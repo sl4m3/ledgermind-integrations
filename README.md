@@ -1,1 +1,1 @@
-# ledgermind-plugin
+# ledgermind-integrations
