@@ -1,0 +1,120 @@
+"""Dependency-free Local/Cloud HTTP transport for RawRound clients."""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+from ..protocol import validate_raw_round
+
+
+class LedgerMindClientError(RuntimeError):
+    """Base transport error."""
+
+
+class LedgerMindNetworkError(LedgerMindClientError):
+    """Temporary transport or 5xx error."""
+
+
+class LedgerMindUnauthorizedError(LedgerMindClientError):
+    """The configured token was rejected."""
+
+
+class LedgerMindConflictError(LedgerMindClientError):
+    """The server rejected a source-round payload conflict."""
+
+
+class LedgerMindResponseError(LedgerMindClientError):
+    """Non-retriable protocol or response error."""
+
+
+def _read_token(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return value or None
+
+
+def _validate_url(url: str, *, allow_remote: bool) -> str:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("endpoint must be an http(s) URL with a host")
+    if not allow_remote and parsed.hostname.lower() not in {"localhost", "127.0.0.1", "::1", "[::1]"}:
+        raise ValueError("remote endpoint requires allow_remote=True")
+    return url.rstrip("/")
+
+
+class LedgerMindClient:
+    def __init__(
+        self,
+        *,
+        endpoint: str,
+        token_file: str | Path | None = None,
+        timeout: float = 5.0,
+        allow_remote: bool = False,
+    ) -> None:
+        self.endpoint = _validate_url(endpoint, allow_remote=allow_remote)
+        self.token_file = Path(token_file).expanduser() if token_file else None
+        self.timeout = max(float(timeout), 0.1)
+        self._token = _read_token(self.token_file) if self.token_file else None
+
+    def retrieve_context(self, *, memory_space_id: str, query: str, limit: int = 5) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/v1/context/retrieve",
+            {"api_version": "1", "memory_space_id": memory_space_id, "query": query, "limit": int(limit)},
+        )
+
+    def submit_round(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        validated = validate_raw_round(payload)
+        return self._request("POST", "/v1/rounds", validated)
+
+    def health(self) -> dict[str, Any]:
+        return self._request("GET", "/v1/health/ready", None)
+
+    def _request(self, method: str, path: str, payload: Mapping[str, Any] | None) -> dict[str, Any]:
+        body = None if payload is None else json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        headers = {"accept": "application/json"}
+        if body is not None:
+            headers["content-type"] = "application/json"
+        if self._token:
+            headers["authorization"] = f"Bearer {self._token}"
+        request = urllib.request.Request(
+            self.endpoint + path,
+            data=body,
+            headers=headers,
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                status = response.status
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            status = exc.code
+            if status == 401:
+                raise LedgerMindUnauthorizedError("authentication failed") from exc
+            if status == 409:
+                raise LedgerMindConflictError("raw round conflict") from exc
+            if status >= 500:
+                raise LedgerMindNetworkError(f"server returned {status}") from exc
+            raise LedgerMindResponseError(f"server returned {status}: {raw[:500]}") from exc
+        except OSError as exc:
+            raise LedgerMindNetworkError(str(exc)) from exc
+        if status not in {200, 201, 202}:
+            raise LedgerMindResponseError(f"unexpected status {status}")
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise LedgerMindResponseError("response was not JSON") from exc
+        if not isinstance(data, dict):
+            raise LedgerMindResponseError("response must be a JSON object")
+        return data

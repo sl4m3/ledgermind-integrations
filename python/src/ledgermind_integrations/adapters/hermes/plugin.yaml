@@ -1,0 +1,5 @@
+# LedgerMind RawRound v2 Hermes adapter
+name: ledgermind-hermes
+version: 0.1.0
+entrypoint: ledgermind_integrations.adapters.hermes
+capture_schema_version: 1
