@@ -61,12 +61,29 @@
         "tool_name": {"type": "string", "minLength": 1, "maxLength": 300},
         "arguments": {},
         "status": {"enum": ["success", "error", "cancelled", "unknown"]}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {"kind": {"const": "message"}},
+          "required": ["kind", "role"],
+          "not": {"anyOf": [{"required": ["tool_call_id"]}, {"required": ["tool_name"]}, {"required": ["arguments"]}, {"required": ["status"]}]}
+        },
+        {
+          "properties": {"kind": {"const": "tool_call"}},
+          "required": ["kind", "tool_call_id", "tool_name"],
+          "not": {"anyOf": [{"required": ["role"]}, {"required": ["status"]}]}
+        },
+        {
+          "properties": {"kind": {"const": "tool_result"}},
+          "required": ["kind", "tool_call_id", "status"],
+          "not": {"required": ["role"]}
+        }
+      ]
     },
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["system", "instance_id", "profile_id", "session_id", "round_id", "event_ids", "source_schema_version", "adapter_version"],
+      "required": ["system", "instance_id", "profile_id", "session_id", "round_id", "first_event_id", "final_event_id", "event_ids", "source_schema_version", "adapter_version"],
       "properties": {
         "system": {"type": "string", "minLength": 1, "maxLength": 100},
         "instance_id": {"type": "string", "minLength": 1, "maxLength": 300},
