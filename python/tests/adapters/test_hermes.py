@@ -23,9 +23,26 @@ def _config(tmp_path: Path) -> HermesConfig:
 
 def _events(final: bool = True) -> list[dict[str, object]]:
     return [
-        {"event_id": "1001", "kind": "message", "role": "user", "content": "Use the repository conventions."},
-        {"event_id": "1002", "kind": "tool_call", "tool_call_id": "call_1", "tool_name": "read_file", "arguments": {"path": "README.md"}},
-        {"event_id": "1003", "kind": "message", "role": "assistant", "final": final, "content": "The conventions are applied."},
+        {
+            "event_id": "1001",
+            "kind": "message",
+            "role": "user",
+            "content": "Use the repository conventions.",
+        },
+        {
+            "event_id": "1002",
+            "kind": "tool_call",
+            "tool_call_id": "call_1",
+            "tool_name": "read_file",
+            "arguments": {"path": "README.md"},
+        },
+        {
+            "event_id": "1003",
+            "kind": "message",
+            "role": "assistant",
+            "final": final,
+            "content": "The conventions are applied.",
+        },
     ]
 
 
@@ -41,7 +58,9 @@ def test_hermes_capture_matches_reference_digest() -> None:
         completed_at="2026-08-02T20:01:05Z",
         events=_events(),
     )
-    fixture = json.loads((Path(__file__).resolve().parents[3] / "conformance/fixtures/hermes_complete.json").read_text())
+    fixture = json.loads(
+        (Path(__file__).resolve().parents[3] / "conformance/valid/hermes_complete.json").read_text()
+    )
     assert payload["payload_digest"] == fixture["payload_digest"]
     assert {"title", "statement", "rationale"}.isdisjoint(payload)
 
@@ -49,7 +68,11 @@ def test_hermes_capture_matches_reference_digest() -> None:
 def test_capture_waits_for_final_event_then_promotes(tmp_path: Path) -> None:
     capture = HermesRoundCapture(_config(tmp_path), FileSpool(tmp_path / "spool"))
     pending = capture.capture_or_defer(
-        session_id="session_01", round_id="round-1", started_at="2026-08-02T20:00:00Z", completed_at="2026-08-02T20:01:05Z", events=_events(False)
+        session_id="session_01",
+        round_id="round-1",
+        started_at="2026-08-02T20:00:00Z",
+        completed_at="2026-08-02T20:01:05Z",
+        events=_events(False),
     )
     assert pending.parent.name == "pending-capture"
     worker = PendingCaptureWorker(capture)

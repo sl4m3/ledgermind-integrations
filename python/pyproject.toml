@@ -7,7 +7,9 @@ name = "ledgermind-integrations"
 version = "0.1.0"
 description = "Client integrations for the LedgerMind RawRound protocol"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "ledgermind-protocol>=2.0.0a1,<2.1",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<9", "ruff>=0.6", "mypy>=1.10"]

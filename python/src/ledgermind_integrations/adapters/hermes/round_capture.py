@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from ...protocol import validate_raw_round, with_payload_digest
+from ledgermind_protocol import validate_raw_round, with_payload_digest
 
 
 def _content(value: object) -> list[dict[str, Any]]:

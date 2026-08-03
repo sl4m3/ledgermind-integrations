@@ -56,7 +56,9 @@ class PendingCaptureWorker:
     def __init__(self, capture: HermesRoundCapture) -> None:
         self.capture = capture
 
-    def run_once(self, resolver: Callable[[Mapping[str, Any]], Sequence[Mapping[str, Any]] | None]) -> int:
+    def run_once(
+        self, resolver: Callable[[Mapping[str, Any]], Sequence[Mapping[str, Any]] | None]
+    ) -> int:
         promoted = 0
         for item_name, pending in self.capture.spool.pop_pending():
             events = resolver(pending)

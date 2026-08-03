@@ -17,7 +17,14 @@ class FakeClient:
 
 def test_delivery_sends_only_request_and_completes(tmp_path: Path) -> None:
     spool = FileSpool(tmp_path / "spool")
-    payload = {"api_version": "2", "memory_space_id": "workspace", "source": {}, "round": {}, "payload_digest": "sha256:" + "a" * 64, "idempotency_key": "sha256:" + "a" * 64}
+    payload = {
+        "api_version": "2",
+        "memory_space_id": "workspace",
+        "source": {},
+        "round": {},
+        "payload_digest": "sha256:" + "a" * 64,
+        "idempotency_key": "sha256:" + "a" * 64,
+    }
     spool.enqueue_ready(payload["idempotency_key"], payload)
     client = FakeClient()
     worker = DeliveryWorker(spool, client)

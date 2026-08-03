@@ -48,7 +48,10 @@ class FileSpool:
         return self._write(self.pending_dir / f"{key}.json", self._copy(payload))
 
     def enqueue_ready(self, key: str, payload: Mapping[str, Any]) -> Path:
-        envelope = {"request": self._copy(payload), "delivery": {"attempts": 0, "next_attempt_at": 0.0}}
+        envelope = {
+            "request": self._copy(payload),
+            "delivery": {"attempts": 0, "next_attempt_at": 0.0},
+        }
         return self._write(self.ready_dir / f"{key}.json", envelope)
 
     def pop_pending(self, limit: int = 10) -> list[tuple[str, dict[str, Any]]]:

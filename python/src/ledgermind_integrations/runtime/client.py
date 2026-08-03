@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ..protocol import validate_raw_round
+from ledgermind_protocol import validate_raw_round
 
 
 class LedgerMindClientError(RuntimeError):
@@ -45,7 +45,12 @@ def _validate_url(url: str, *, allow_remote: bool) -> str:
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("endpoint must be an http(s) URL with a host")
-    if not allow_remote and parsed.hostname.lower() not in {"localhost", "127.0.0.1", "::1", "[::1]"}:
+    if not allow_remote and parsed.hostname.lower() not in {
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "[::1]",
+    }:
         raise ValueError("remote endpoint requires allow_remote=True")
     return url.rstrip("/")
 
@@ -64,22 +69,37 @@ class LedgerMindClient:
         self.timeout = max(float(timeout), 0.1)
         self._token = _read_token(self.token_file) if self.token_file else None
 
-    def retrieve_context(self, *, memory_space_id: str, query: str, limit: int = 5) -> dict[str, Any]:
+    def retrieve_context(
+        self, *, memory_space_id: str, query: str, limit: int = 5
+    ) -> dict[str, Any]:
         return self._request(
             "POST",
             "/v1/context/retrieve",
-            {"api_version": "1", "memory_space_id": memory_space_id, "query": query, "limit": int(limit)},
+            {
+                "api_version": "1",
+                "memory_space_id": memory_space_id,
+                "query": query,
+                "limit": int(limit),
+            },
         )
 
     def submit_round(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         validated = validate_raw_round(payload)
-        return self._request("POST", "/v1/rounds", validated)
+        return self._request(
+            "POST",
+            "/v1/rounds",
+            validated.model_dump(mode="json", exclude_none=True),
+        )
 
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/v1/health/ready", None)
 
     def _request(self, method: str, path: str, payload: Mapping[str, Any] | None) -> dict[str, Any]:
-        body = None if payload is None else json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        body = (
+            None
+            if payload is None
+            else json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+        )
         headers = {"accept": "application/json"}
         if body is not None:
             headers["content-type"] = "application/json"

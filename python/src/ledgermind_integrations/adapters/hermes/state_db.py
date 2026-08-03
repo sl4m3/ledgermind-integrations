@@ -19,7 +19,19 @@ class HermesStateReader:
         connection.row_factory = sqlite3.Row
         try:
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(messages)")}
-            selected = [name for name in ("id", "role", "content", "api_content", "tool_call_id", "tool_name", "tool_calls") if name in columns]
+            selected = [
+                name
+                for name in (
+                    "id",
+                    "role",
+                    "content",
+                    "api_content",
+                    "tool_call_id",
+                    "tool_name",
+                    "tool_calls",
+                )
+                if name in columns
+            ]
             if not {"id", "role"}.issubset(columns):
                 return []
             rows = connection.execute(
@@ -28,7 +40,11 @@ class HermesStateReader:
             ).fetchall()
             events: list[dict[str, Any]] = []
             for row in rows:
-                content = row["api_content"] if "api_content" in columns and row["api_content"] else row["content"]
+                content = (
+                    row["api_content"]
+                    if "api_content" in columns and row["api_content"]
+                    else row["content"]
+                )
                 event: dict[str, Any] = {
                     "event_id": str(row["id"]),
                     "kind": "message",
