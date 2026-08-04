@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -30,15 +31,37 @@ class HermesRoundCapture:
         started_at: str,
         completed_at: str,
         events: Sequence[Mapping[str, Any]],
+        pending_metadata: Mapping[str, Any] | None = None,
     ) -> Path:
         if not events or not any(bool(event.get("final")) for event in events):
-            pending = {
-                "session_id": session_id,
-                "round_id": round_id,
-                "started_at": started_at,
-                "completed_at": completed_at,
-                "events": [dict(event) for event in events],
-            }
+            pending = dict(pending_metadata or {})
+            pending.setdefault("session_id", session_id)
+            pending.setdefault("round_id", round_id)
+            pending.setdefault("external_turn_id", None)
+            pending.setdefault("started_at", started_at)
+            pending.setdefault("completed_at", completed_at)
+            pending.setdefault("first_message_id", None)
+            pending.setdefault("last_message_id", None)
+            pending.setdefault("user_message_id", None)
+            pending.setdefault("assistant_message_id", None)
+            pending.setdefault(
+                "known_event_ids",
+                [
+                    str(event.get("event_id"))
+                    for event in events
+                    if event.get("event_id") is not None
+                ],
+            )
+            pending.setdefault(
+                "known_tool_events",
+                [
+                    str(event.get("event_id"))
+                    for event in events
+                    if event.get("kind") in {"tool_call", "tool_result"}
+                    and event.get("event_id") is not None
+                ],
+            )
+            pending["events"] = [dict(event) for event in events]
             return self.spool.enqueue_pending(round_id, pending)
         payload = build_raw_round(
             memory_space_id=self.config.memory_space_id,
@@ -59,6 +82,8 @@ class HermesRoundCapture:
 class PendingCaptureWorker:
     """Promote pending captures after state.db exposes a final event."""
 
+    _BACKOFF_SECONDS = (1.0, 3.0, 10.0, 30.0, 120.0)
+
     def __init__(self, capture: HermesRoundCapture, *, max_attempts: int = 3) -> None:
         self.capture = capture
         self.max_attempts = max(int(max_attempts), 1)
@@ -72,17 +97,26 @@ class PendingCaptureWorker:
             if not isinstance(delivery, dict):
                 delivery = {"attempts": 0, "next_attempt_at": 0.0}
                 pending["delivery"] = delivery
-            attempts = int(delivery.get("attempts", 0)) + 1
+            attempts = self._attempt_number(delivery) + 1
             delivery["attempts"] = attempts
+            resolver_reason = "source_range_not_found"
             try:
                 events = resolver(pending)
-            except Exception:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001
                 events = None
+                resolver_reason = self._resolver_failure_reason(exc)
             if not events or not any(bool(event.get("final")) for event in events):
-                if attempts >= self.max_attempts:
-                    self.capture.spool.fail_pending(item_name, "final_event_unavailable")
-                else:
-                    self.capture.spool.retry_pending(item_name, pending)
+                self._retry_pending(
+                    item_name,
+                    pending,
+                    attempts=attempts,
+                    reason=(
+                        resolver_reason
+                        if events is None
+                        else "final_message_not_committed"
+                    ),
+                    until_deadline=True,
+                )
                 continue
             try:
                 payload = build_raw_round(
@@ -98,11 +132,9 @@ class PendingCaptureWorker:
                     adapter_version=self.capture.config.adapter_version,
                     source_schema_version=self.capture.config.source_schema_version,
                 )
-            except Exception:  # noqa: BLE001
-                if attempts >= self.max_attempts:
-                    self.capture.spool.fail_pending(item_name, "raw_round_validation_failed")
-                else:
-                    self.capture.spool.retry_pending(item_name, pending)
+            except Exception as exc:  # noqa: BLE001
+                reason = "digest_mismatch" if "digest" in str(exc).lower() else "invalid_source_data"
+                self.capture.spool.fail_pending(item_name, reason)
                 continue
             try:
                 self.capture.spool.enqueue_ready(
@@ -111,11 +143,61 @@ class PendingCaptureWorker:
                     exclude=(self.capture.spool.pending_dir / item_name,),
                 )
             except Exception:  # noqa: BLE001
-                if attempts >= self.max_attempts:
-                    self.capture.spool.fail_pending(item_name, "ready_queue_unavailable")
-                else:
-                    self.capture.spool.retry_pending(item_name, pending)
+                self._retry_pending(
+                    item_name,
+                    pending,
+                    attempts=attempts,
+                    reason="ready_queue_unavailable",
+                    until_deadline=False,
+                )
                 continue
             self.capture.spool.complete_pending(item_name)
             promoted += 1
         return promoted
+
+    def _retry_pending(
+        self,
+        item_name: str,
+        pending: dict[str, Any],
+        *,
+        attempts: int,
+        reason: str,
+        until_deadline: bool,
+    ) -> None:
+        delivery = pending.setdefault("delivery", {})
+        if not isinstance(delivery, dict):
+            delivery = {}
+            pending["delivery"] = delivery
+        deadline = self._deadline(delivery)
+        if deadline is not None and time.time() >= deadline:
+            self.capture.spool.fail_pending(item_name, reason)
+            return
+        if not until_deadline and attempts >= self.max_attempts:
+            self.capture.spool.fail_pending(item_name, reason)
+            return
+        index = min(max(attempts - 1, 0), len(self._BACKOFF_SECONDS) - 1)
+        delivery["last_error"] = reason
+        delivery["next_attempt_at"] = time.time() + self._BACKOFF_SECONDS[index]
+        self.capture.spool.retry_pending(item_name, pending)
+
+    @staticmethod
+    def _attempt_number(delivery: Mapping[str, Any]) -> int:
+        try:
+            return max(int(delivery.get("attempts", 0)), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _deadline(delivery: Mapping[str, Any]) -> float | None:
+        value = delivery.get("deadline_at")
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _resolver_failure_reason(exc: Exception) -> str:
+        message = str(exc).lower()
+        if "locked" in message or "busy" in message:
+            return "state_db_locked"
+        return "source_range_not_found"

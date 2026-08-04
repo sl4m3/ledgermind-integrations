@@ -27,6 +27,11 @@ class PreLLMCallKwargs(TypedDict, total=False):
     platform: str
     parent_session_id: str
     sender_id: str
+    started_at: str
+    first_message_id: int | str
+    last_message_id: int | str
+    message_id: int | str
+    user_message_id: int | str
 
 
 class PostLLMCallKwargs(TypedDict, total=False):
@@ -38,6 +43,12 @@ class PostLLMCallKwargs(TypedDict, total=False):
     conversation_history: Sequence[Mapping[str, Any]]
     model: str
     platform: str
+    started_at: str
+    first_message_id: int | str
+    last_message_id: int | str
+    message_id: int | str
+    user_message_id: int | str
+    assistant_message_id: int | str
 
 
 class PreToolCallKwargs(TypedDict, total=False):
@@ -48,6 +59,9 @@ class PreToolCallKwargs(TypedDict, total=False):
     tool_call_id: str
     turn_id: str
     api_request_id: str
+    first_message_id: int | str
+    last_message_id: int | str
+    message_id: int | str
 
 
 class PostToolCallKwargs(PreToolCallKwargs, total=False):

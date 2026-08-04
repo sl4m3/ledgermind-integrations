@@ -181,18 +181,33 @@ class FileSpool:
 
     def pop_pending(self, limit: int = 10) -> list[tuple[str, dict[str, Any]]]:
         self._ensure()
-        result: list[tuple[str, dict[str, Any]]] = []
-        for path in sorted(self.pending_dir.glob("*.json"))[: max(int(limit), 1)]:
+        now = time.time()
+        due_items: list[tuple[float, Path, dict[str, Any]]] = []
+        for path in self.pending_dir.glob("*.json"):
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 self.fail_pending(path.name, "invalid_json")
                 continue
-            if isinstance(payload, dict):
-                result.append((path.name, payload))
-            else:
+            if not isinstance(payload, dict):
                 self.fail_pending(path.name, "invalid_payload")
-        return result
+                continue
+            delivery = payload.get("delivery")
+            next_attempt_at: float
+            if isinstance(delivery, Mapping):
+                try:
+                    next_attempt_at = float(delivery.get("next_attempt_at", 0.0))
+                except (TypeError, ValueError):
+                    next_attempt_at = 0.0
+            else:
+                next_attempt_at = 0.0
+            if next_attempt_at <= now:
+                due_items.append((next_attempt_at, path, payload))
+        due_items.sort(key=lambda item: (item[0], item[1].name))
+        return [
+            (path.name, payload)
+            for _, path, payload in due_items[: max(int(limit), 1)]
+        ]
 
     def retry_pending(self, item_name: str, payload: Mapping[str, Any]) -> None:
         self._write(self.pending_dir / item_name, self._copy(payload))

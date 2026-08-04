@@ -11,7 +11,7 @@ _runtime: HermesPluginRuntime | None = None
 def register(ctx: HermesPluginContext) -> None:
     global _runtime
     if _runtime is not None:
-        _runtime.stop()
+        _runtime.shutdown()
     _runtime = HermesPluginRuntime.from_context(ctx)
     _runtime.register_hooks(ctx)
     _runtime.start()
