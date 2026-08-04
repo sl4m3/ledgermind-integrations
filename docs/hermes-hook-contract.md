@@ -1,7 +1,7 @@
 # Verified Hermes hook contract
 
 - **Verified:** 2026-08-03
-- **Installed source:** `/home/stanislav/.hermes/hermes-agent`
+- **Installed source:** the Hermes Agent installation selected by the current runtime environment.
 
 LedgerMind uses the public plugin registration surface from
 `hermes_cli.plugins.PluginContext.register_hook(hook_name, callback)`.
