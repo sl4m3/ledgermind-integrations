@@ -19,7 +19,7 @@
   "$defs": {
     "operation": {
       "type": "string",
-      "enum": ["handshake", "health", "accept_hypothesis", "retrieve_context", "record_context_usage", "poll_projection_events", "ack_projection_events", "shutdown"]
+      "enum": ["handshake", "health", "accept_hypothesis", "retrieve_context", "record_context_usage", "poll_projection_events", "ack_projection_events", "poll_model_tasks", "submit_model_result", "fail_model_task", "create_backup", "validate_backup", "prepare_restore", "shutdown"]
     }
   }
 }
