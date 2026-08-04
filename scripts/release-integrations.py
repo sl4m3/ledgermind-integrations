@@ -11,7 +11,9 @@ with a commit-bound manifest.
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -242,6 +244,42 @@ def _wheel_names(wheel: Path) -> list[str]:
         return [name for name in archive.namelist() if not name.endswith("/")]
 
 
+def _normalize_sdist(path: Path, epoch: int) -> None:
+    """Rewrite setuptools' sdist with stable tar and gzip metadata."""
+
+    with tarfile.open(path, "r:gz") as source:
+        entries: list[tuple[tarfile.TarInfo, bytes | None]] = []
+        for member in source.getmembers():
+            content = None
+            if member.isfile():
+                handle = source.extractfile(member)
+                if handle is None:
+                    raise ReleaseError(f"cannot read sdist member: {member.name}")
+                content = handle.read()
+            entries.append((member, content))
+    raw_tar = io.BytesIO()
+    with tarfile.open(fileobj=raw_tar, mode="w", format=tarfile.PAX_FORMAT) as destination:
+        for member, content in sorted(entries, key=lambda item: item[0].name):
+            normalized = tarfile.TarInfo(member.name)
+            normalized.type = member.type
+            normalized.mode = member.mode
+            normalized.linkname = member.linkname
+            normalized.mtime = epoch
+            normalized.uid = 0
+            normalized.gid = 0
+            normalized.uname = ""
+            normalized.gname = ""
+            normalized.size = len(content) if content is not None else 0
+            destination.addfile(
+                normalized,
+                io.BytesIO(content) if content is not None else None,
+            )
+    compressed = io.BytesIO()
+    with gzip.GzipFile(fileobj=compressed, mode="wb", filename="", mtime=0) as stream:
+        stream.write(raw_tar.getvalue())
+    path.write_bytes(compressed.getvalue())
+
+
 def _validate_wheel(wheel: Path, package: str, required: set[str]) -> None:
     names = _wheel_names(wheel)
     name_set = set(names)
@@ -300,6 +338,7 @@ def _build_distribution(
             f"{package}: expected one wheel and one sdist, found "
             f"{len(wheels)} wheels and {len(sdists)} sdists"
         )
+    _normalize_sdist(sdists[0], int(env["SOURCE_DATE_EPOCH"]))
     _validate_wheel(wheels[0], package, required)
     return wheels[0], sdists[0]
 
