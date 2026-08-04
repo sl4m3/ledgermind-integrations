@@ -30,7 +30,7 @@ MessageId = int | str | None
 
 def _hermes_home() -> Path:
     try:
-        from hermes_constants import get_hermes_home  # type: ignore[import-untyped]
+        from hermes_constants import get_hermes_home  # type: ignore[import-not-found]
     except ImportError:
         return Path(os.environ.get("HERMES_HOME", "~/.hermes")).expanduser()
     return Path(get_hermes_home())
