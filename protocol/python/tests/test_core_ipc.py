@@ -6,9 +6,15 @@ from pathlib import Path
 import pytest
 
 from ledgermind_protocol.core_ipc import (
+    CORE_IPC_CAPABILITIES,
     CORE_IPC_ERROR_CODES,
     CORE_IPC_OPERATIONS,
+    CORE_KNOWLEDGE_SCHEMA_VERSION,
     BackupManifestPayload,
+    BeginRestorePayload,
+    BeginRestoreResultPayload,
+    CommitRestorePayload,
+    CommitRestoreResultPayload,
     CoreError,
     CoreRequestEnvelope,
     CoreResponseEnvelope,
@@ -17,6 +23,8 @@ from ledgermind_protocol.core_ipc import (
     HandshakeResultPayload,
     PrepareRestorePayload,
     PrepareRestoreResultPayload,
+    RollbackRestorePayload,
+    RollbackRestoreResultPayload,
     ValidateBackupPayload,
 )
 
@@ -37,6 +45,9 @@ _SCHEMA_NAMES = {
     "create-backup-v1.schema.json",
     "validate-backup-v1.schema.json",
     "prepare-restore-v1.schema.json",
+    "begin-restore-v1.schema.json",
+    "commit-restore-v1.schema.json",
+    "rollback-restore-v1.schema.json",
 }
 
 
@@ -119,25 +130,30 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
             "create_backup",
             "validate_backup",
             "prepare_restore",
+            "begin_restore",
+            "commit_restore",
+            "rollback_restore",
             "shutdown",
         }
     )
     handshake = HandshakeResultPayload(
         protocol_version=1,
         core_version="0.1.0",
-        knowledge_schema_version=5,
+        knowledge_schema_version=6,
         supported_operations=tuple(sorted(CORE_IPC_OPERATIONS)),
         capabilities={
+            "coordinated_restore": True,
             "core_owned_backup": True,
             "model_task_failure_reporting": True,
             "projection_events": True,
         },
     )
     payload = handshake.to_payload()
-    assert payload["knowledge_schema_version"] == 5
+    assert payload["knowledge_schema_version"] == 6
     capabilities = payload["capabilities"]
     assert isinstance(capabilities, dict)
     assert capabilities["core_owned_backup"] is True
+    assert capabilities["coordinated_restore"] is True
 
 
 def test_failure_and_backup_payloads_round_trip() -> None:
@@ -164,16 +180,154 @@ def test_failure_and_backup_payloads_round_trip() -> None:
         relative_path="exchange/outgoing/snapshot.sqlite",
         sha256="sha256:" + "b" * 64,
         size_bytes=42,
-        schema_version=5,
+        schema_version=6,
     )
     prepared = PrepareRestoreResultPayload(
         restore_token="token-1",
         relative_path="exchange/incoming/snapshot.sqlite",
         sha256=validate.sha256,
         size_bytes=42,
-        schema_version=5,
+        schema_version=6,
         requires_restart=True,
     )
     assert BackupManifestPayload.from_payload(manifest.to_payload()) == manifest
     assert prepared.to_payload()["requires_restart"] is True
     assert CreateBackupPayload.from_payload({}).to_payload() == {}
+    with pytest.raises(TypeError):
+        CreateBackupPayload.from_payload([])
+
+
+def test_restore_decoders_reject_unknown_fields() -> None:
+    begin_payload = {
+        "relative_path": "exchange/incoming/snapshot.bin",
+        "sha256": "sha256:" + "a" * 64,
+        "restore_token": "token-1",
+    }
+    with pytest.raises(ValueError, match="unknown fields"):
+        BeginRestorePayload.from_payload({**begin_payload, "unexpected": True})
+
+    with pytest.raises(ValueError, match="unknown fields"):
+        CommitRestorePayload.from_payload(
+            {"restore_transaction_id": "transaction-1", "unexpected": True}
+        )
+    with pytest.raises(ValueError, match="unknown fields"):
+        RollbackRestorePayload.from_payload(
+            {"restore_transaction_id": "transaction-1", "unexpected": True}
+        )
+
+
+def test_envelope_and_handshake_decoders_reject_unknown_fields() -> None:
+    with pytest.raises(ValueError, match="unknown fields"):
+        CoreRequestEnvelope.from_payload(
+            {
+                "protocol_version": 1,
+                "request_id": "request-1",
+                "operation": "begin_restore",
+                "payload": {},
+                "unexpected": True,
+            }
+        )
+
+    with pytest.raises(ValueError, match="unknown fields"):
+        HandshakeResultPayload.from_payload(
+            {
+                "protocol_version": 1,
+                "core_version": "0.1.0",
+                "knowledge_schema_version": CORE_KNOWLEDGE_SCHEMA_VERSION,
+                "supported_operations": sorted(CORE_IPC_OPERATIONS),
+                "capabilities": {name: True for name in CORE_IPC_CAPABILITIES},
+                "unexpected": True,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "../knowledge.db",
+        "exchange/incoming/../../knowledge.db",
+        "exchange/incoming\\..\\knowledge.db",
+        "/tmp/knowledge.db",
+    ],
+)
+def test_restore_payloads_reject_path_traversal(relative_path: str) -> None:
+    with pytest.raises(ValueError):
+        BeginRestorePayload(
+            relative_path=relative_path,
+            sha256="sha256:" + "a" * 64,
+            restore_token="token-1",
+        )
+
+
+@pytest.mark.parametrize(
+    "sha256",
+    [
+        "sha256:" + "A" * 64,
+        "sha256:" + "a" * 63,
+        "sha256:" + "g" * 64,
+        "sha256-" + "a" * 64,
+    ],
+)
+def test_restore_payloads_reject_invalid_sha256(sha256: str) -> None:
+    with pytest.raises(ValueError):
+        BeginRestorePayload(
+            relative_path="exchange/incoming/snapshot.bin",
+            sha256=sha256,
+            restore_token="token-1",
+        )
+
+
+def test_restore_retry_envelopes_keep_transaction_identity() -> None:
+    begin = BeginRestorePayload(
+        relative_path="exchange/incoming/snapshot.bin",
+        sha256="sha256:" + "a" * 64,
+        restore_token="token-1",
+    )
+    assert BeginRestorePayload.from_payload(begin.to_payload()) == begin
+
+    commit = CommitRestorePayload("transaction-1")
+    first_commit = CoreRequestEnvelope(1, "restore-commit-1", "commit_restore", commit.to_payload())
+    retry_commit = CoreRequestEnvelope(1, "restore-commit-1", "commit_restore", commit.to_payload())
+    assert first_commit.to_json() == retry_commit.to_json()
+
+    rollback = RollbackRestorePayload("transaction-1")
+    first_rollback = CoreRequestEnvelope(
+        1, "restore-rollback-1", "rollback_restore", rollback.to_payload()
+    )
+    retry_rollback = CoreRequestEnvelope(
+        1, "restore-rollback-1", "rollback_restore", rollback.to_payload()
+    )
+    assert first_rollback.to_json() == retry_rollback.to_json()
+
+    begun = BeginRestoreResultPayload(
+        relative_path="exchange/incoming/snapshot.bin",
+        sha256="sha256:" + "a" * 64,
+        size_bytes=10,
+        schema_version=CORE_KNOWLEDGE_SCHEMA_VERSION,
+        restore_transaction_id="transaction-1",
+        state="applied_pending_commit",
+    )
+    assert BeginRestoreResultPayload.from_payload(begun.to_payload()) == begun
+
+    committed = CommitRestoreResultPayload("transaction-1", True, "committed")
+    rolled_back = RollbackRestoreResultPayload("transaction-1", True, "rolled_back")
+    assert CommitRestoreResultPayload.from_payload(committed.to_payload()) == committed
+    assert RollbackRestoreResultPayload.from_payload(rolled_back.to_payload()) == rolled_back
+
+    with pytest.raises(ValueError):
+        BeginRestorePayload("exchange/incoming/snapshot.bin", "sha256:" + "a" * 64, "")
+    with pytest.raises(ValueError):
+        CommitRestorePayload("")
+    with pytest.raises(ValueError):
+        RollbackRestorePayload("../transaction")
+
+
+def test_restore_schemas_are_closed_objects() -> None:
+    for schema_name in (
+        "prepare-restore-v1.schema.json",
+        "begin-restore-v1.schema.json",
+        "commit-restore-v1.schema.json",
+        "rollback-restore-v1.schema.json",
+    ):
+        schema = json.loads((_SCHEMA_ROOT / schema_name).read_text(encoding="utf-8"))
+        assert schema["additionalProperties"] is False
