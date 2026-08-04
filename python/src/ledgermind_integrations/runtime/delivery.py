@@ -56,15 +56,15 @@ class DeliveryWorker:
             return
         try:
             self.client.submit_round(request)
-        except LedgerMindConflictError as exc:
-            self.spool.fail(item_name, f"source_round_conflict:{exc}")
+        except LedgerMindConflictError:
+            self.spool.fail(item_name, "source_round_conflict")
         except (LedgerMindNetworkError, LedgerMindUnauthorizedError):
             delay = min(self.max_backoff_seconds, self.base_backoff_seconds * (2 ** (attempts - 1)))
             delivery["next_attempt_at"] = time.time() + delay
             self.spool.retry(item_name, mutable)
-        except LedgerMindClientError as exc:
-            self.spool.fail(item_name, f"delivery_error:{exc}")
-        except Exception as exc:  # noqa: BLE001
-            self.spool.fail(item_name, f"delivery_error:{exc}")
+        except LedgerMindClientError:
+            self.spool.fail(item_name, "delivery_error")
+        except Exception:  # noqa: BLE001
+            self.spool.fail(item_name, "delivery_error")
         else:
             self.spool.complete(item_name)

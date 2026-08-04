@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/model-result-v1.schema.json",
+  "title": "LedgerMind ModelResult v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "memory_space_id", "worker_id", "result"],
+  "properties": {
+    "task_id": {"type": "string", "minLength": 1},
+    "memory_space_id": {"type": "string", "minLength": 1},
+    "worker_id": {"type": "string", "minLength": 1},
+    "result": {"type": "object"}
+  }
+}

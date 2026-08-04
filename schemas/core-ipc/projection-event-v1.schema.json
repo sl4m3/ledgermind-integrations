@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/projection-event-v1.schema.json",
+  "title": "LedgerMind Core projection event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_id", "event_type", "aggregate_id", "memory_space_id", "payload", "occurred_at"],
+  "properties": {
+    "event_id": {"type": "string", "minLength": 1},
+    "event_type": {"type": "string", "minLength": 1},
+    "aggregate_id": {"type": "string", "minLength": 1},
+    "memory_space_id": {"type": "string", "minLength": 1},
+    "payload": {"type": "object"},
+    "occurred_at": {"type": "string", "minLength": 1}
+  }
+}

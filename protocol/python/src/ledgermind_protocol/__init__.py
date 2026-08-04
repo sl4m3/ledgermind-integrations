@@ -9,6 +9,14 @@ from .canonical import (
     with_payload_digest,
 )
 from .context import ContextView, ContextViewItem, RetrieveContextRequest
+from .core_ipc import (
+    CORE_IPC_ERROR_CODES,
+    CORE_IPC_OPERATIONS,
+    CORE_IPC_PROTOCOL_VERSION,
+    CoreError,
+    CoreRequestEnvelope,
+    CoreResponseEnvelope,
+)
 from .models import (
     SHA256_CHECKSUM_PATTERN,
     ProtocolModel,
@@ -21,9 +29,15 @@ from .models import (
 from .validation import RawRoundValidationError, validate_raw_round
 
 __all__ = [
+    "CORE_IPC_ERROR_CODES",
+    "CORE_IPC_OPERATIONS",
+    "CORE_IPC_PROTOCOL_VERSION",
     "SHA256_CHECKSUM_PATTERN",
     "ContextView",
     "ContextViewItem",
+    "CoreError",
+    "CoreRequestEnvelope",
+    "CoreResponseEnvelope",
     "ProtocolModel",
     "RawContentPart",
     "RawRoundBody",

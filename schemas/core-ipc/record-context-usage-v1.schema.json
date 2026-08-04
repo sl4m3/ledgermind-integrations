@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/record-context-usage-v1.schema.json",
+  "title": "LedgerMind Core IPC v1 record context usage payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["memory_space_id", "item_ids"],
+  "properties": {
+    "memory_space_id": {"type": "string", "minLength": 1},
+    "item_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+  }
+}

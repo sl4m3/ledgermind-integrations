@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/context-view-v1.schema.json",
+  "title": "LedgerMind ContextView v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "items"],
+  "properties": {
+    "api_version": {"const": "1"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["knowledge_id", "title", "target", "statement", "relevance"],
+        "properties": {
+          "knowledge_id": {"type": "string", "minLength": 1},
+          "title": {"type": "string"},
+          "target": {"type": "string"},
+          "statement": {"type": "string"},
+          "relevance": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    }
+  }
+}

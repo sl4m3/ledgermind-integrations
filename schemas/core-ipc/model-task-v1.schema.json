@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/model-task-v1.schema.json",
+  "title": "LedgerMind ModelTask v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "operation", "memory_space_id", "expected_versions", "expires_at", "model_input"],
+  "properties": {
+    "task_id": {"type": "string", "minLength": 1},
+    "operation": {"type": "string", "enum": ["merge_knowledge"]},
+    "memory_space_id": {"type": "string", "minLength": 1},
+    "expected_versions": {
+      "type": "object",
+      "minProperties": 2,
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "propertyNames": {"minLength": 1}
+    },
+    "expires_at": {"type": "string", "format": "date-time"},
+    "model_input": {"type": "object"},
+    "lease_expires_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/request-envelope-v1.schema.json",
+  "title": "LedgerMind Core IPC v1 request envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "request_id", "operation", "payload"],
+  "properties": {
+    "protocol_version": {"const": 1},
+    "request_id": {"type": "string", "minLength": 1},
+    "operation": {
+      "type": "string",
+      "enum": ["handshake", "health", "accept_hypothesis", "retrieve_context", "record_context_usage", "poll_projection_events", "ack_projection_events", "shutdown"]
+    },
+    "payload": {"type": "object"}
+  }
+}
