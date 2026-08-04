@@ -1,15 +1,60 @@
 # ledgermind-integrations
 
-Client integrations for the language-independent LedgerMind RawRound protocol.
+`ledgermind-integrations` — открытый client-side слой LedgerMind для
+захвата RawRound v2. Он не является Local и не содержит закрытый Core.
 
-The Python package is intentionally independent from `ledgermind-core` and
-`ledgermind-local`. It captures only data observable by the client, computes the
-canonical RawRound digest, queues delivery, retrieves context, and sends
-`POST /v1/rounds` to either Local or Cloud.
+## Capture-only runtime
 
-```text
+- Интеграции наблюдают только данные, доступные в клиенте, и собирают один
+  неизменяемый завершённый `RawRound v2`: сообщения, tool calls/results,
+  границы раунда и provenance.
+- Они не извлекают semantic fields, не создают Hypothesis/Atom и не принимают
+  решения о knowledge.
+- Интеграции **не вызывают модели** и не содержат model provider, inference
+  profile или provider secret. Модельная обработка выполняется Local или
+  выбранной облачной службой после приёма RawRound.
+
+## Delivery endpoint
+
+После валидации и canonical digest интеграция может доставить RawRound через
+публичный protocol на выбранный пользователем endpoint:
+
+- локальный Local endpoint, обычно `POST /v1/rounds`;
+- выбранный пользователем Cloud endpoint с тем же public contract.
+
+Адрес, authentication и egress policy задаются владельцем установки. Поэтому
+доставка может передать наблюдаемый conversation/tool payload за пределы
+машины; Integrations не скрывает этот boundary и не отправляет semantic
+hypotheses или credentials.
+
+## Durable spool sensitivity
+
+Spool нужен для bounded retry и восстановления после перезапуска. Его записи
+могут содержать raw conversation, tool arguments/results, source identity и
+provenance — это чувствительные данные, даже если provider secret из них
+удалён.
+
+Держите spool в каталоге с private permissions, ограничивайте размер и срок
+хранения, не синхронизируйте его в публичные каталоги и не коммитьте в Git.
+Архивы и quarantine records обрабатывайте как чувствительные backup artifacts;
+передавайте их только по доверенному каналу.
+
+## Hermes plugin package
+
+Установка регистрирует plugin entrypoint и поставляет `plugin.yaml`:
+
+```bash
 ledgermind-integrations install hermes --destination ~/.hermes/plugins
 ```
 
-The client never generates a hypothesis and never sends semantic fields such as
-`title`, `statement`, `rationale`, `phase`, or `confidence`.
+Регистрация выполняется через публичный Hermes hook surface. Hooks только
+захватывают наблюдаемые события, fail open на транспортной ошибке и не делают
+модельные вызовы или неограниченные retry-loop внутри callback.
+
+## Package boundary
+
+Wheel Integrations должен содержать только namespaced
+`ledgermind_integrations` runtime, Hermes plugin entry и bundled
+`adapters/hermes/plugin.yaml`; build-копии, test DB, `.pyc`, private keys и
+секретные env-файлы в release contents не входят. Общий `ledgermind-protocol`
+поставляет `py.typed`, RawRound schema, canonical JSON и conformance fixtures.
