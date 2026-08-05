@@ -49,6 +49,7 @@ PROTOCOL_REQUIRED_WHEEL_FILES = {
 }
 INTEGRATIONS_REQUIRED_WHEEL_FILES = {
     "ledgermind_integrations/__init__.py",
+    "ledgermind_integrations/py.typed",
     "ledgermind_integrations/adapters/hermes/plugin.yaml",
     "ledgermind_integrations/adapters/hermes/plugin_entry.py",
     "ledgermind_integrations/adapters/hermes/runtime.py",
@@ -289,6 +290,21 @@ def _validate_wheel(wheel: Path, package: str, required: set[str]) -> None:
     normalized = package.replace("-", "_")
     if not any(name.startswith(f"{normalized}-") and name.endswith(".dist-info/METADATA") for name in names):
         raise ReleaseError(f"{package} wheel is missing dist-info metadata")
+    metadata_roots = {
+        Path(name).parts[0]
+        for name in names
+        if Path(name).parts
+        and Path(name).parts[0].startswith(f"{normalized}-")
+        and Path(name).parts[0].endswith(".dist-info")
+    }
+    package_root = f"{normalized}/"
+    outside_boundary = [
+        name
+        for name in names
+        if not name.startswith(package_root) and Path(name).parts[0] not in metadata_roots
+    ]
+    if outside_boundary:
+        raise ReleaseError(f"unexpected public package path in wheel: {outside_boundary}")
     for name in names:
         path = Path(name)
         lower_name = name.lower()
@@ -306,6 +322,34 @@ def _validate_wheel(wheel: Path, package: str, required: set[str]) -> None:
             raise ReleaseError(f"secret/config artifact in wheel: {name}")
         if "build-copy" in path.parts:
             raise ReleaseError(f"build copy in wheel: {name}")
+
+
+def _validate_sdist(sdist: Path, package: str, required: set[str]) -> None:
+    with tarfile.open(sdist, "r:gz") as archive:
+        names = [member.name for member in archive.getmembers()]
+    roots = {Path(name).parts[0] for name in names if Path(name).parts}
+    if len(roots) != 1:
+        raise ReleaseError(f"{package} sdist must have one top-level directory")
+    root = next(iter(roots))
+    required_names = {"pyproject.toml", *(f"src/{name}" for name in required)}
+    missing = sorted(f"{root}/{name}" for name in required_names if f"{root}/{name}" not in names)
+    if missing:
+        raise ReleaseError(f"{package} sdist is missing required source files: {missing}")
+    for name in names:
+        path = Path(name)
+        lower_name = name.lower()
+        if any(component in _GENERATED_DIR_NAMES for component in path.parts[1:]):
+            raise ReleaseError(f"generated path in sdist: {name}")
+        if path.suffix.lower() in _GENERATED_FILE_SUFFIXES:
+            raise ReleaseError(f"bytecode in sdist: {name}")
+        if path.suffix.lower() in _FORBIDDEN_DATABASE_SUFFIXES:
+            raise ReleaseError(f"database in sdist: {name}")
+        if (
+            path.name.lower() in _FORBIDDEN_SECRET_NAMES
+            or path.suffix.lower() in _FORBIDDEN_SECRET_SUFFIXES
+            or ".env" in lower_name
+        ):
+            raise ReleaseError(f"secret/config artifact in sdist: {name}")
 
 
 def _build_distribution(
@@ -340,6 +384,7 @@ def _build_distribution(
         )
     _normalize_sdist(sdists[0], int(env["SOURCE_DATE_EPOCH"]))
     _validate_wheel(wheels[0], package, required)
+    _validate_sdist(sdists[0], package, required)
     return wheels[0], sdists[0]
 
 
@@ -594,6 +639,8 @@ def verify(args: argparse.Namespace) -> Path:
         raise ReleaseError("unexpected project names in Integrations workspace")
     path = _manifest_path(args, integrations_version, commit)
     manifest = _load_manifest(path)
+    if manifest.get("format") != "ledgermind-release-manifest-v1":
+        raise ReleaseError("manifest format is not supported")
     if manifest.get("component") != COMPONENT:
         raise ReleaseError("manifest component does not match Integrations")
     if manifest.get("source_commit") != commit or manifest.get("commit_sha") != commit:
@@ -608,6 +655,21 @@ def verify(args: argparse.Namespace) -> Path:
     build_epoch = manifest.get("build_time_epoch")
     if not isinstance(build_epoch, (int, float)) or build_epoch < commit_epoch:
         raise ReleaseError("manifest was created before the current source commit")
+    source_archive_sha256 = manifest.get("source_archive_sha256")
+    if not isinstance(source_archive_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", source_archive_sha256):
+        raise ReleaseError("manifest must record the source archive SHA-256")
+    checks = manifest.get("checks")
+    required_checks = {
+        "clean_tracked_source",
+        "protocol_wheel_contents",
+        "integrations_wheel_contents",
+        "schema_and_conformance_assets",
+        "install_smoke",
+        "cli_help",
+        "hermes_active_round_runtime",
+    }
+    if not isinstance(checks, dict) or any(checks.get(name) is not True for name in required_checks):
+        raise ReleaseError("manifest does not contain all successful release checks")
     smoke = manifest.get("install_smoke")
     if not isinstance(smoke, dict) or smoke.get("passed") is not True:
         raise ReleaseError("manifest does not prove install smoke passed")
@@ -615,20 +677,42 @@ def verify(args: argparse.Namespace) -> Path:
     digest_map = manifest.get("sha256")
     if not isinstance(records, list) or not records or not isinstance(digest_map, dict):
         raise ReleaseError("manifest must list artifacts and SHA-256 digests")
+    artifact_names: list[str] = []
     for record in records:
         if not isinstance(record, dict) or not isinstance(record.get("name"), str):
             raise ReleaseError("manifest contains an invalid artifact record")
         name = record["name"]
         if Path(name).name != name:
             raise ReleaseError("manifest artifact path must be a file name")
+        if name in artifact_names:
+            raise ReleaseError(f"manifest contains duplicate artifact: {name}")
+        artifact_names.append(name)
         artifact = path.parent / name
         if not artifact.is_file():
             raise ReleaseError(f"manifest artifact is missing: {artifact}")
         digest = _sha256(artifact)
         if digest != record.get("sha256") or digest_map.get(name) != digest:
             raise ReleaseError(f"SHA-256 mismatch for release artifact: {name}")
+        if record.get("size_bytes") != artifact.stat().st_size:
+            raise ReleaseError(f"size mismatch for release artifact: {name}")
         if artifact.stat().st_mtime + 1 < commit_epoch:
             raise ReleaseError(f"artifact predates current source commit: {name}")
+    expected_sdists = {
+        f"{integrations_name.replace('-', '_')}-{integrations_version}.tar.gz",
+        f"{protocol_name.replace('-', '_')}-{protocol_version}.tar.gz",
+    }
+    if not expected_sdists.issubset(artifact_names):
+        raise ReleaseError("manifest is missing a protocol or integrations sdist")
+    for name, version in (
+        (integrations_name, integrations_version),
+        (protocol_name, protocol_version),
+    ):
+        normalized = name.replace("-", "_")
+        if not any(
+            artifact.startswith(f"{normalized}-{version}-") and artifact.endswith(".whl")
+            for artifact in artifact_names
+        ):
+            raise ReleaseError(f"manifest is missing the {name} wheel")
     _cleanup_generated(ROOT)
     _assert_no_generated(ROOT)
     _git_state(ROOT)

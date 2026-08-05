@@ -31,13 +31,27 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
         return commit, timestamp
 
     def _manifest(self, directory: Path, commit: str, commit_timestamp: int) -> Path:
-        artifact = directory / "integrations-test-artifact.whl"
-        artifact.write_bytes(b"release-test")
-        digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
         with (ROOT / "python" / "pyproject.toml").open("rb") as handle:
             integrations_version = tomllib.load(handle)["project"]["version"]
         with (ROOT / "protocol" / "python" / "pyproject.toml").open("rb") as handle:
             protocol_version = tomllib.load(handle)["project"]["version"]
+        artifact_names = (
+            f"ledgermind_integrations-{integrations_version}-py3-none-any.whl",
+            f"ledgermind_integrations-{integrations_version}.tar.gz",
+            f"ledgermind_protocol-{protocol_version}-py3-none-any.whl",
+            f"ledgermind_protocol-{protocol_version}.tar.gz",
+        )
+        artifacts = []
+        for index, name in enumerate(artifact_names):
+            artifact = directory / name
+            artifact.write_bytes(f"release-test-{index}".encode())
+            artifacts.append(
+                {
+                    "name": artifact.name,
+                    "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+                    "size_bytes": artifact.stat().st_size,
+                }
+            )
         manifest = directory / "ledgermind-integrations-manifest.json"
         manifest.write_text(
             json.dumps(
@@ -47,17 +61,25 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
                     "source_commit": commit,
                     "commit_sha": commit,
                     "source_commit_timestamp": commit_timestamp,
+                    "source_archive_sha256": "0" * 64,
                     "version": integrations_version,
                     "versions": {
                         "ledgermind-integrations": integrations_version,
                         "ledgermind-protocol": protocol_version,
                     },
                     "build_time_epoch": commit_timestamp + 1,
+                    "checks": {
+                        "clean_tracked_source": True,
+                        "protocol_wheel_contents": True,
+                        "integrations_wheel_contents": True,
+                        "schema_and_conformance_assets": True,
+                        "install_smoke": True,
+                        "cli_help": True,
+                        "hermes_active_round_runtime": True,
+                    },
                     "install_smoke": {"passed": True},
-                    "artifacts": [
-                        {"name": artifact.name, "sha256": digest, "size_bytes": artifact.stat().st_size}
-                    ],
-                    "sha256": {artifact.name: digest},
+                    "artifacts": artifacts,
+                    "sha256": {item["name"]: item["sha256"] for item in artifacts},
                 }
             ),
             encoding="utf-8",
@@ -74,6 +96,41 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("system-site-packages", result.stdout)
+
+    def test_dev_extras_declare_quality_and_release_tools(self) -> None:
+        for relative in ("python/pyproject.toml", "protocol/python/pyproject.toml"):
+            with (ROOT / relative).open("rb") as handle:
+                metadata = tomllib.load(handle)
+            dev = metadata["project"]["optional-dependencies"]["dev"]
+            self.assertTrue(any(str(spec).startswith("pytest>=") for spec in dev), relative)
+            self.assertTrue(any(str(spec).startswith("ruff>=") for spec in dev), relative)
+            self.assertTrue(any(str(spec).startswith("mypy>=") for spec in dev), relative)
+            self.assertTrue(any(str(spec).startswith("build>=") for spec in dev), relative)
+
+    def test_runtime_dependencies_preserve_public_protocol_boundary(self) -> None:
+        with (ROOT / "python" / "pyproject.toml").open("rb") as handle:
+            integrations = tomllib.load(handle)["project"]["dependencies"]
+        with (ROOT / "protocol" / "python" / "pyproject.toml").open("rb") as handle:
+            protocol = tomllib.load(handle)["project"]["dependencies"]
+        self.assertEqual(integrations, ["ledgermind-protocol>=2.0.0a1,<2.1"])
+        self.assertEqual(protocol, ["pydantic>=2.7,<3"])
+
+    def test_verify_rejects_changed_artifact(self) -> None:
+        commit, timestamp = self._head()
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manifest = self._manifest(directory, commit, timestamp)
+            wheel = next(directory.glob("ledgermind_integrations-*.whl"))
+            wheel.write_bytes(b"tampered")
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT), "verify", "--manifest", str(manifest)],
+                cwd=ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("SHA-256 mismatch", result.stderr)
 
     def test_verify_rejects_missing_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
