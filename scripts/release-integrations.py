@@ -91,6 +91,7 @@ _FORBIDDEN_SECRET_NAMES = {
 }
 _FORBIDDEN_SECRET_SUFFIXES = {".key", ".pem", ".p12", ".pfx", ".token"}
 _FORBIDDEN_DATABASE_SUFFIXES = {".db", ".sqlite", ".sqlite3"}
+_LICENSE_FILE_NAMES = {"LICENSE", "NOTICE", "COPYING"}
 
 
 class ReleaseError(RuntimeError):
@@ -352,6 +353,18 @@ def _validate_sdist(sdist: Path, package: str, required: set[str]) -> None:
             raise ReleaseError(f"secret/config artifact in sdist: {name}")
 
 
+def _validate_license_files(archive: Path, package: str) -> None:
+    if archive.suffix == ".whl":
+        names = _wheel_names(archive)
+    else:
+        with tarfile.open(archive, "r:gz") as source:
+            names = [member.name for member in source.getmembers()]
+    present = {Path(name).name for name in names}
+    missing = sorted(_LICENSE_FILE_NAMES - present)
+    if missing:
+        raise ReleaseError(f"{package} release artifact is missing license files: {missing}")
+
+
 def _build_distribution(
     project_source: Path,
     output: Path,
@@ -385,6 +398,8 @@ def _build_distribution(
     _normalize_sdist(sdists[0], int(env["SOURCE_DATE_EPOCH"]))
     _validate_wheel(wheels[0], package, required)
     _validate_sdist(sdists[0], package, required)
+    _validate_license_files(wheels[0], package)
+    _validate_license_files(sdists[0], package)
     return wheels[0], sdists[0]
 
 
@@ -603,6 +618,7 @@ def build(args: argparse.Namespace) -> Path:
             "clean_tracked_source": True,
             "protocol_wheel_contents": True,
             "integrations_wheel_contents": True,
+            "license_files": True,
             "schema_and_conformance_assets": True,
             "install_smoke": True,
             "cli_help": True,
@@ -667,6 +683,7 @@ def verify(args: argparse.Namespace) -> Path:
         "install_smoke",
         "cli_help",
         "hermes_active_round_runtime",
+        "license_files",
     }
     if not isinstance(checks, dict) or any(checks.get(name) is not True for name in required_checks):
         raise ReleaseError("manifest does not contain all successful release checks")

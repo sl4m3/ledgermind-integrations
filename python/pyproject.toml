@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "ledgermind-integrations"
 version = "0.1.0"
 description = "Client integrations for the LedgerMind RawRound protocol"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "COPYING"]
 requires-python = ">=3.10"
 dependencies = [
     "ledgermind-protocol>=2.0.0a1,<2.1",

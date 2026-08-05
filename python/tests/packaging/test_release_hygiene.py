@@ -72,6 +72,7 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
                         "clean_tracked_source": True,
                         "protocol_wheel_contents": True,
                         "integrations_wheel_contents": True,
+                        "license_files": True,
                         "schema_and_conformance_assets": True,
                         "install_smoke": True,
                         "cli_help": True,
