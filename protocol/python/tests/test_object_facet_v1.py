@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 from ledgermind_protocol.object_facet_v1 import (
     EmbedResult,
-    EmbeddingRequest,
     GenericExecutionTask,
     IngestRawRoundRequest,
     IngestRawRoundResponse,
@@ -18,10 +17,8 @@ from ledgermind_protocol.object_facet_v1 import (
     OperationalExtractionResult,
     RecordRetrievalOutcome,
     ResolutionContext,
-    RetrievalItem,
     RetrievalRequest,
     RetrievalResponse,
-    SelectionExplanation,
 )
 
 _ROOT = Path(__file__).resolve().parents[3]
