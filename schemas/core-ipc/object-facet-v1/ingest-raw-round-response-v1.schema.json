@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v1/ingest-raw-round-response-v1.schema.json",
+  "title": "LedgerMind object-facet v1 ingest raw round response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["raw_round_id", "duplicate", "operational_job_id", "status"],
+  "properties": {
+    "raw_round_id": {"type": "string", "minLength": 1, "maxLength": 500},
+    "duplicate": {"type": "boolean"},
+    "operational_job_id": {"type": "string", "minLength": 1, "maxLength": 500},
+    "status": {"enum": ["queued", "processing", "completed", "failed"]}
+  }
+}

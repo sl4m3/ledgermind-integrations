@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v1/ingest-raw-round-request-v1.schema.json",
+  "title": "LedgerMind object-facet v1 ingest raw round request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["command_id", "idempotency_key", "raw_round"],
+  "properties": {
+    "command_id": {"type": "string", "minLength": 1, "maxLength": 500},
+    "idempotency_key": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "raw_round": {"type": "object"},
+    "resolution_context": {"$ref": "#/$defs/resolution_context"}
+  },
+  "$defs": {
+    "resolution_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "project_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "repository_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "task_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "conversation_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "related_object_ids": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {"type": "string", "minLength": 1, "maxLength": 500},
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": {"required": ["repository_id"]},
+          "then": {"required": ["project_id"]}
+        }
+      ]
+    }
+  }
+}

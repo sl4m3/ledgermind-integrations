@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v1/retrieval-response-v1.schema.json",
+  "title": "LedgerMind object-facet v1 retrieval response (explainable ContextView)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "retrieval_request_id",
+    "items"
+  ],
+  "properties": {
+    "retrieval_request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "items": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/retrieval_item"
+      }
+    }
+  },
+  "$defs": {
+    "retrieval_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value_id",
+        "primary_object_id",
+        "object_name",
+        "facet",
+        "content",
+        "relevance",
+        "selection_explanation"
+      ],
+      "properties": {
+        "value_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "primary_object_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "object_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "facet": {
+          "$ref": "#/$defs/facet"
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20000
+        },
+        "relevance": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "selection_explanation": {
+          "$ref": "#/$defs/selection_explanation"
+        }
+      }
+    },
+    "selection_explanation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "object_reasons",
+        "facet_activations",
+        "score_components"
+      ],
+      "properties": {
+        "object_reasons": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "exact_alias",
+              "canonical_exact",
+              "lexical_similarity",
+              "object_card_embedding",
+              "project_match",
+              "repository_match",
+              "task_match",
+              "related_object_match",
+              "conversation_match"
+            ]
+          }
+        },
+        "facet_activations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 14,
+          "items": {
+            "$ref": "#/$defs/facet_activation"
+          }
+        },
+        "score_components": {
+          "$ref": "#/$defs/score_components"
+        }
+      }
+    },
+    "facet_activation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facet",
+        "score"
+      ],
+      "properties": {
+        "facet": {
+          "$ref": "#/$defs/facet"
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "signals": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "score_components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "semantic",
+        "object",
+        "facet",
+        "scope_time",
+        "context",
+        "recency",
+        "support",
+        "usage"
+      ],
+      "properties": {
+        "semantic": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "object": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "facet": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "scope_time": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "context": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "recency": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "support": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "usage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "facet": {
+      "enum": [
+        "identity",
+        "property",
+        "state",
+        "function",
+        "structure",
+        "procedure",
+        "maintenance",
+        "risk",
+        "constraint",
+        "preference",
+        "decision",
+        "experience",
+        "relation",
+        "event"
+      ]
+    }
+  }
+}
