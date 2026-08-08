@@ -1,0 +1,13 @@
+{
+  "protocol": "object-facet-v2",
+  "canonical": "sha256 over typed model, nulls omitted, keys sorted, compact",
+  "valid": {
+    "v_context_extension.json": "sha256:469e951dfb40812195ea3d7c1e194ffb763bfa83aa1d7fd123aefc8a2ba9a32e",
+    "v_extraction_ambiguous.json": "sha256:970347ffdf21b0699e71438cf94521a7982ca1af6d1f1a39697976a1f5747155",
+    "v_extraction_existing.json": "sha256:09fd980d802b1943d1cb6cf28fd5d9960cea7a5b7342a233ebd1658e691be5e0",
+    "v_extraction_extended_name.json": "sha256:9ffc3f3fe5d44ed8667496c9f3d539d045a23c7c14083c3176d33a7d83010d05",
+    "v_extraction_new.json": "sha256:9f6d51a77be8d029f084ed890e7f3fbf68587a8ea92bd55ca736fdfac710b50e",
+    "v_operational_input.json": "sha256:7dbab442d0e83795b7bab3d42c3db2bc9a62c5300ecd382e7ac6d2581aff31d5",
+    "v_retrieval_direct_semantic.json": "sha256:3332818ee28db79f50fb3e69254181d2639ae4364cc7d4999f46c47c6e5c63f4"
+  }
+}

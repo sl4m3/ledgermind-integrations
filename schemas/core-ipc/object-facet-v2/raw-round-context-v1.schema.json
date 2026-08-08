@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v2/raw-round-context-v1.schema.json",
+  "title": "LedgerMind RawRound ledgermind_context_v1 extension",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ledgermind_context_v1"],
+  "properties": {
+    "ledgermind_context_v1": {"$ref": "#/$defs/context"}
+  },
+  "$defs": {
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retrieval_request_id", "delivered_value_ids"],
+      "properties": {
+        "retrieval_request_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "delivered_value_ids": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 500}
+        }
+      }
+    }
+  }
+}
