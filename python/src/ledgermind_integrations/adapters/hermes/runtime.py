@@ -26,6 +26,8 @@ from .state_db import HermesStateReader
 logger = logging.getLogger(__name__)
 
 MessageId = int | str | None
+_CONTEXT_EXTENSION_KEY = "ledgermind_context_v1"
+_MAX_CONTEXT_IDS = 100
 
 
 def _hermes_home() -> Path:
@@ -48,6 +50,8 @@ class ActiveRoundState:
     last_message_id: MessageId = None
     user_message_id: MessageId = None
     assistant_message_id: MessageId = None
+    retrieval_request_id: str | None = None
+    delivered_value_ids: list[str] = field(default_factory=list)
     captured_events: list[dict[str, Any]] = field(default_factory=list)
     tool_calls_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
     completed: bool = False
@@ -200,6 +204,8 @@ class HermesPluginRuntime:
         if not isinstance(response, Mapping):
             return None
         context = self._format_context(response)
+        if context:
+            self._record_context_retrieval(state, response)
         return {"context": context} if context else None
 
     def on_pre_tool_call(self, **kwargs: Any) -> None:
@@ -279,6 +285,7 @@ class HermesPluginRuntime:
         events = list(state.captured_events)
         completed_at = self._now()
         metadata = self._pending_metadata(state, completed_at)
+        extensions = metadata.get("extensions")
         try:
             self.capture.capture_or_defer(
                 session_id=state.session_id,
@@ -287,6 +294,7 @@ class HermesPluginRuntime:
                 completed_at=completed_at,
                 events=events,
                 pending_metadata=metadata,
+                extensions=extensions if isinstance(extensions, Mapping) else None,
             )
         except Exception as exc:  # noqa: BLE001
             # Keep complete structural evidence for delayed recovery. The
@@ -399,6 +407,8 @@ class HermesPluginRuntime:
             session_state = self.session_states.get(normalized_session_id)
             if session_state is not None:
                 session_state.active_round_id = None
+            if state is not None:
+                self._clear_context_refs(state)
             return state
 
     def finish_session(self, session_id: str) -> None:
@@ -470,6 +480,7 @@ class HermesPluginRuntime:
             state.completed = True
             if self.active_rounds.get(state.session_id) is state:
                 self.active_rounds.pop(state.session_id, None)
+            self._clear_context_refs(state)
             session_state = self.session_states.get(state.session_id)
             if session_state is not None:
                 session_state.active_round_id = None
@@ -488,6 +499,7 @@ class HermesPluginRuntime:
         state.completed = True
         if self.active_rounds.get(state.session_id) is state:
             self.active_rounds.pop(state.session_id, None)
+        self._clear_context_refs(state)
         session_state = self.session_states.get(state.session_id)
         if session_state is not None:
             session_state.active_round_id = None
@@ -504,7 +516,7 @@ class HermesPluginRuntime:
             if event.get("kind") in {"tool_call", "tool_result"}
             and event.get("event_id") is not None
         ]
-        return {
+        metadata: dict[str, Any] = {
             "session_id": state.session_id,
             "round_id": state.round_id,
             "external_turn_id": state.external_turn_id,
@@ -517,6 +529,60 @@ class HermesPluginRuntime:
             "known_event_ids": known_event_ids,
             "known_tool_events": known_tool_events,
         }
+        extensions = self._context_extensions(state)
+        if extensions is not None:
+            metadata["extensions"] = extensions
+        return metadata
+
+    def _record_context_retrieval(
+        self, state: ActiveRoundState, response: Mapping[str, Any]
+    ) -> None:
+        retrieval_request_id = response.get("retrieval_request_id")
+        if not isinstance(retrieval_request_id, str) or not retrieval_request_id.strip():
+            return
+        items = response.get("items")
+        if not isinstance(items, list):
+            return
+        with self._lock:
+            if state.completed:
+                return
+            state.retrieval_request_id = retrieval_request_id.strip()
+            known_ids = set(state.delivered_value_ids)
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                _, statement = self._context_item_text(item)
+                if not statement:
+                    continue
+                value_id = item.get("value_id")
+                if not isinstance(value_id, str):
+                    continue
+                normalized_value_id = value_id.strip()
+                if (
+                    not normalized_value_id
+                    or normalized_value_id in known_ids
+                    or len(state.delivered_value_ids) >= _MAX_CONTEXT_IDS
+                ):
+                    continue
+                state.delivered_value_ids.append(normalized_value_id)
+                known_ids.add(normalized_value_id)
+
+    def _context_extensions(self, state: ActiveRoundState) -> dict[str, Any] | None:
+        with self._lock:
+            retrieval_request_id = state.retrieval_request_id
+            if not retrieval_request_id:
+                return None
+            return {
+                _CONTEXT_EXTENSION_KEY: {
+                    "retrieval_request_id": retrieval_request_id,
+                    "delivered_value_ids": list(state.delivered_value_ids[:_MAX_CONTEXT_IDS]),
+                }
+            }
+
+    @staticmethod
+    def _clear_context_refs(state: ActiveRoundState) -> None:
+        state.retrieval_request_id = None
+        state.delivered_value_ids.clear()
 
     def _ensure_user_event(
         self, state: ActiveRoundState, content: object, kwargs: Mapping[str, Any]
@@ -661,8 +727,7 @@ class HermesPluginRuntime:
         for item in items:
             if not isinstance(item, Mapping):
                 continue
-            title = str(item.get("title", "")).strip()
-            statement = str(item.get("statement", "")).strip()
+            title, statement = HermesPluginRuntime._context_item_text(item)
             if not statement:
                 continue
             lines.append(f"- {title}: {statement}" if title else f"- {statement}")
@@ -673,6 +738,18 @@ class HermesPluginRuntime:
             + "\n".join(lines)
             + "\n[/LEDGERMIND CONTEXT]"
         )
+
+    @staticmethod
+    def _context_item_text(item: Mapping[str, Any]) -> tuple[str, str]:
+        title_value = item.get("object_name")
+        if title_value is None:
+            title_value = item.get("title", "")
+        statement_value = item.get("content")
+        if statement_value is None:
+            statement_value = item.get("statement", "")
+        title = title_value.strip() if isinstance(title_value, str) else ""
+        statement = statement_value.strip() if isinstance(statement_value, str) else ""
+        return title, statement
 
 
 __all__ = ["ActiveRoundState", "HermesPluginRuntime", "SessionState"]

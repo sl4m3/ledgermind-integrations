@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ledgermind_protocol import validate_raw_round, with_payload_digest
+from ledgermind_protocol.object_facet_v2 import validate_raw_round_extensions
 
 
 def _content(value: object) -> list[dict[str, Any]]:
@@ -53,6 +54,7 @@ def build_raw_round(
     events: Sequence[Mapping[str, Any]],
     adapter_version: str = "hermes-python/0.1.0",
     source_schema_version: int = 1,
+    extensions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized = [normalize_event(event, index, round_id) for index, event in enumerate(events)]
     event_ids = [event["event_id"] for event in normalized]
@@ -78,7 +80,11 @@ def build_raw_round(
             "events": normalized,
         },
     }
+    if extensions is not None:
+        payload["extensions"] = dict(extensions)
     result = with_payload_digest(payload)
     result["idempotency_key"] = result["payload_digest"]
+    if extensions is not None:
+        validate_raw_round_extensions(result["extensions"])
     validate_raw_round(result)
     return result

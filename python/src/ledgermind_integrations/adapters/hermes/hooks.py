@@ -32,9 +32,17 @@ class HermesRoundCapture:
         completed_at: str,
         events: Sequence[Mapping[str, Any]],
         pending_metadata: Mapping[str, Any] | None = None,
+        extensions: Mapping[str, Any] | None = None,
     ) -> Path:
+        pending = dict(pending_metadata or {})
+        effective_extensions = extensions
+        if effective_extensions is None:
+            candidate = pending.get("extensions")
+            if isinstance(candidate, Mapping):
+                effective_extensions = candidate
+        if effective_extensions is not None:
+            pending["extensions"] = dict(effective_extensions)
         if not events or not any(bool(event.get("final")) for event in events):
-            pending = dict(pending_metadata or {})
             pending.setdefault("session_id", session_id)
             pending.setdefault("round_id", round_id)
             pending.setdefault("external_turn_id", None)
@@ -73,6 +81,7 @@ class HermesRoundCapture:
             started_at=started_at,
             completed_at=completed_at,
             events=events,
+            extensions=effective_extensions,
             adapter_version=self.config.adapter_version,
             source_schema_version=self.config.source_schema_version,
         )
@@ -129,6 +138,11 @@ class PendingCaptureWorker:
                     started_at=str(pending["started_at"]),
                     completed_at=str(pending["completed_at"]),
                     events=events,
+                    extensions=(
+                        pending.get("extensions")
+                        if isinstance(pending.get("extensions"), Mapping)
+                        else None
+                    ),
                     adapter_version=self.capture.config.adapter_version,
                     source_schema_version=self.capture.config.source_schema_version,
                 )
