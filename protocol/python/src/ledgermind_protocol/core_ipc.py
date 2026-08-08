@@ -9,13 +9,20 @@ from pathlib import PurePosixPath
 from typing import Any, ClassVar
 
 CORE_IPC_PROTOCOL_VERSION = 1
-CORE_KNOWLEDGE_SCHEMA_VERSION = 6
+CORE_KNOWLEDGE_SCHEMA_VERSION = 9
 CORE_IPC_CAPABILITIES = frozenset(
     {
         "coordinated_restore",
         "core_owned_backup",
         "model_task_failure_reporting",
         "projection_events",
+        "object_facet_memory_v1",
+        "generic_execution_tasks_v1",
+        "raw_round_ingest_v2",
+        "context_retrieval_v2",
+        "object_resolution_v1",
+        "explainable_context_v1",
+        "control_contour_v1",
     }
 )
 CORE_IPC_SUPPORTED_OPERATIONS = (
@@ -35,6 +42,14 @@ CORE_IPC_SUPPORTED_OPERATIONS = (
     "begin_restore",
     "commit_restore",
     "rollback_restore",
+    "ingest_raw_round_v2",
+    "poll_execution_tasks_v2",
+    "submit_execution_result_v2",
+    "fail_execution_task_v2",
+    "retrieve_context_v2",
+    "record_retrieval_outcome_v2",
+    "run_control_maintenance_v1",
+    "get_object_facet_statistics_v1",
     "shutdown",
 )
 CORE_IPC_OPERATIONS = frozenset(CORE_IPC_SUPPORTED_OPERATIONS)

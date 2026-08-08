@@ -133,23 +133,26 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
             "begin_restore",
             "commit_restore",
             "rollback_restore",
+            "ingest_raw_round_v2",
+            "poll_execution_tasks_v2",
+            "submit_execution_result_v2",
+            "fail_execution_task_v2",
+            "retrieve_context_v2",
+            "record_retrieval_outcome_v2",
+            "run_control_maintenance_v1",
+            "get_object_facet_statistics_v1",
             "shutdown",
         }
     )
     handshake = HandshakeResultPayload(
         protocol_version=1,
         core_version="0.1.0",
-        knowledge_schema_version=6,
+        knowledge_schema_version=CORE_KNOWLEDGE_SCHEMA_VERSION,
         supported_operations=tuple(sorted(CORE_IPC_OPERATIONS)),
-        capabilities={
-            "coordinated_restore": True,
-            "core_owned_backup": True,
-            "model_task_failure_reporting": True,
-            "projection_events": True,
-        },
+        capabilities={name: True for name in CORE_IPC_CAPABILITIES},
     )
     payload = handshake.to_payload()
-    assert payload["knowledge_schema_version"] == 6
+    assert payload["knowledge_schema_version"] == CORE_KNOWLEDGE_SCHEMA_VERSION
     capabilities = payload["capabilities"]
     assert isinstance(capabilities, dict)
     assert capabilities["core_owned_backup"] is True
@@ -180,14 +183,14 @@ def test_failure_and_backup_payloads_round_trip() -> None:
         relative_path="exchange/outgoing/snapshot.sqlite",
         sha256="sha256:" + "b" * 64,
         size_bytes=42,
-        schema_version=6,
+        schema_version=CORE_KNOWLEDGE_SCHEMA_VERSION,
     )
     prepared = PrepareRestoreResultPayload(
         restore_token="token-1",
         relative_path="exchange/incoming/snapshot.sqlite",
         sha256=validate.sha256,
         size_bytes=42,
-        schema_version=6,
+        schema_version=CORE_KNOWLEDGE_SCHEMA_VERSION,
         requires_restart=True,
     )
     assert BackupManifestPayload.from_payload(manifest.to_payload()) == manifest

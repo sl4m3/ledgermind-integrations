@@ -211,6 +211,7 @@ class ResolutionContext(ProtocolModel):
 class IngestRawRoundRequest(ProtocolModel):
     command_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     idempotency_key: str
+    memory_space_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     raw_round: dict[str, Any]
     resolution_context: ResolutionContext | None = None
 
@@ -500,6 +501,8 @@ class RetrievalRequest(ProtocolModel):
     memory_space_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     query_text: str = Field(min_length=1, max_length=MAX_QUERY_TEXT_LENGTH)
     query_embedding: list[float] = Field(min_length=1, max_length=MAX_EMBEDDING_DIMENSIONS)
+    embedding_model_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    embedding_model_version: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     limit: int = Field(ge=1, le=100)
     project_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     repository_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
