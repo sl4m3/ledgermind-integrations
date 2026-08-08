@@ -2,6 +2,8 @@
   "memory_space_id": "space-ledgermind",
   "query_text": "Как устроен LedgerMind?",
   "query_embedding": [0.1, 0.3, 0.94],
+  "embedding_model_id": "retrieval-embedder",
+  "embedding_model_version": "1",
   "limit": 10,
   "project_id": "project-ledgermind",
   "repository_id": "repo-ledgermind",

@@ -261,6 +261,8 @@ def test_resolution_context_requires_project_with_repository() -> None:
                 "memory_space_id": "space-1",
                 "query_text": "query",
                 "query_embedding": [0.1],
+                "embedding_model_id": "retrieval-embedder",
+                "embedding_model_version": "1",
                 "limit": 10,
                 "repository_id": "repo-1",
                 "explanation_level": "compact",

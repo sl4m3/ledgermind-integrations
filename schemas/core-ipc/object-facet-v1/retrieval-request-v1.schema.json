@@ -4,7 +4,7 @@
   "title": "LedgerMind object-facet v1 retrieval request",
   "type": "object",
   "additionalProperties": false,
-  "required": ["memory_space_id", "query_text", "query_embedding", "limit", "explanation_level"],
+  "required": ["memory_space_id", "query_text", "query_embedding", "embedding_model_id", "embedding_model_version", "limit", "explanation_level"],
   "properties": {
     "memory_space_id": {"type": "string", "minLength": 1, "maxLength": 500},
     "query_text": {"type": "string", "minLength": 1, "maxLength": 20000},
@@ -14,6 +14,8 @@
       "maxItems": 8192,
       "items": {"type": "number"}
     },
+    "embedding_model_id": {"type": "string", "minLength": 1, "maxLength": 500},
+    "embedding_model_version": {"type": "string", "minLength": 1, "maxLength": 500},
     "limit": {"type": "integer", "minimum": 1, "maximum": 100},
     "project_id": {"type": "string", "minLength": 1, "maxLength": 500},
     "repository_id": {"type": "string", "minLength": 1, "maxLength": 500},
