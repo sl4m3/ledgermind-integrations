@@ -1,0 +1,44 @@
+{
+  "task_id": "task-extract-1",
+  "task_kind": "generate_json",
+  "operation": "extract_values",
+  "profile_slot": "operational",
+  "memory_space_id": "space-ledgermind",
+  "model_request": {
+    "messages": [
+      {"role": "system", "content": "Извлеки объекты и значения из упоминаний."}
+    ],
+    "max_output_tokens": 4096,
+    "response_format": "json_object"
+  },
+  "expires_at": "2026-08-07T12:00:00Z",
+  "operation_input": {
+    "mentions": [
+      {
+        "mention_ref": "m1",
+        "surface_text": "Postgres",
+        "normalized_text": "postgres",
+        "candidates": [
+          {
+            "object_id": "obj-postgresql",
+            "canonical_name": "PostgreSQL",
+            "aliases": ["Postgres"],
+            "match_reasons": ["exact_alias"],
+            "lexical_score": 1.0,
+            "embedding_score": 0.94,
+            "context_score": 0.82
+          },
+          {
+            "object_id": "obj-sqlite",
+            "canonical_name": "SQLite",
+            "aliases": [],
+            "match_reasons": ["repository_match"],
+            "lexical_score": 0.6,
+            "embedding_score": 0.55,
+            "context_score": 0.9
+          }
+        ]
+      }
+    ]
+  }
+}

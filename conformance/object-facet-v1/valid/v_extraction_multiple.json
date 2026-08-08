@@ -1,0 +1,38 @@
+{
+  "objects": [
+    {
+      "ref": "o1",
+      "mention_ref": "m1",
+      "resolution": "existing",
+      "existing_object_id": "obj-postgresql",
+      "aliases_from_source": ["Postgres"],
+      "source_event_ids": ["event-1"]
+    },
+    {
+      "ref": "o2",
+      "mention_ref": "m2",
+      "resolution": "existing",
+      "existing_object_id": "obj-sqlite",
+      "aliases_from_source": ["SQLite"],
+      "source_event_ids": ["event-1"]
+    }
+  ],
+  "values": [
+    {
+      "primary_object_ref": "o1",
+      "related_object_refs": ["o2"],
+      "facet": "relation",
+      "content": "Postgres быстрее SQLite",
+      "source_kind": "explicit_user",
+      "source_event_ids": ["event-1"]
+    },
+    {
+      "primary_object_ref": "o2",
+      "related_object_refs": [],
+      "facet": "function",
+      "content": "SQLite работает как встраиваемая база данных",
+      "source_kind": "assistant_output",
+      "source_event_ids": ["event-2"]
+    }
+  ]
+}

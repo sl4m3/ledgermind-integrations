@@ -1,0 +1,10 @@
+{
+  "task_id": "task-embed-1",
+  "model_id": "local-embed-1",
+  "model_version": "0.1.0",
+  "dimensions": 3,
+  "vectors": [
+    [0.1, 0.2, 0.97],
+    [0.97, 0.2, 0.1]
+  ]
+}

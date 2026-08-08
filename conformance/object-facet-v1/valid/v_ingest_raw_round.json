@@ -1,0 +1,52 @@
+{
+  "command_id": "command-1",
+  "idempotency_key": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "raw_round": {
+    "api_version": "2",
+    "idempotency_key": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "memory_space_id": "space-ledgermind",
+    "source": {
+      "system": "hermes",
+      "instance_id": "instance-1",
+      "profile_id": "profile-1",
+      "session_id": "session-1",
+      "round_id": "round-1",
+      "first_event_id": "event-1",
+      "final_event_id": "event-2",
+      "event_ids": ["event-1", "event-2"],
+      "source_schema_version": 2,
+      "adapter_version": "hermes-1"
+    },
+    "round": {
+      "started_at": "2026-08-01T10:00:00Z",
+      "completed_at": "2026-08-01T10:05:00Z",
+      "events": [
+        {
+          "event_id": "event-1",
+          "sequence": 0,
+          "kind": "message",
+          "role": "user",
+          "content": [{"type": "text", "text": "Postgres быстрее SQLite"}]
+        },
+        {
+          "event_id": "event-2",
+          "sequence": 1,
+          "kind": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "PostgreSQL это система управления базами данных с открытым исходным кодом."
+            }
+          ],
+          "final": true
+        }
+      ]
+    },
+    "payload_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "resolution_context": {
+    "project_id": "project-ledgermind",
+    "repository_id": "repo-ledgermind"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "task_id": "task-embed-1",
+  "task_kind": "embed_texts",
+  "operation": "embed_texts",
+  "profile_slot": "embedding",
+  "memory_space_id": "space-ledgermind",
+  "embedding_request": {
+    "texts": [
+      "PostgreSQL это система управления базами данных с открытым исходным кодом",
+      "SQLite работает как встраиваемая база данных"
+    ],
+    "purpose": "object_card",
+    "dimensions": 3
+  },
+  "expires_at": "2026-08-07T12:00:00Z"
+}

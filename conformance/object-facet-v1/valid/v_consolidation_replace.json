@@ -1,0 +1,10 @@
+{
+  "action": "replace",
+  "source_value_ids": ["v3"],
+  "result": {
+    "primary_object_id": "obj-postgresql",
+    "related_object_ids": ["obj-sqlite"],
+    "facet": "property",
+    "content": "PostgreSQL версия 17"
+  }
+}

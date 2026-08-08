@@ -1,0 +1,14 @@
+{
+  "objects": [
+    {
+      "ref": "o1",
+      "mention_ref": "m1",
+      "resolution": "existing",
+      "existing_object_id": "obj-postgresql",
+      "aliases_from_source": ["Postgres"],
+      "source_event_ids": ["event-1"],
+      "phase": "canonical"
+    }
+  ],
+  "values": []
+}

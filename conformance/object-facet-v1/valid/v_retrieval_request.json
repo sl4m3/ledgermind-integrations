@@ -1,0 +1,13 @@
+{
+  "memory_space_id": "space-ledgermind",
+  "query_text": "Как устроен LedgerMind?",
+  "query_embedding": [0.1, 0.3, 0.94],
+  "limit": 10,
+  "project_id": "project-ledgermind",
+  "repository_id": "repo-ledgermind",
+  "task_id": "task-1",
+  "conversation_id": "conversation-1",
+  "related_object_ids": ["obj-ledgermind"],
+  "requested_facets": ["structure", "function"],
+  "explanation_level": "compact"
+}

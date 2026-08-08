@@ -1,0 +1,27 @@
+{
+  "objects": [
+    {
+      "ref": "o1",
+      "mention_ref": "m1",
+      "resolution": "existing",
+      "existing_object_id": "obj-postgresql",
+      "new_canonical_name": null,
+      "ambiguous_candidate_ids": [],
+      "aliases_from_source": ["Postgres"],
+      "source_event_ids": ["event-1"]
+    }
+  ],
+  "values": [
+    {
+      "primary_object_ref": "o1",
+      "related_object_refs": [],
+      "facet": "relation",
+      "content": "PostgreSQL быстрее SQLite",
+      "source_kind": "explicit_user",
+      "source_event_ids": ["event-1"],
+      "scope_text": null,
+      "valid_from": null,
+      "valid_to": null
+    }
+  ]
+}

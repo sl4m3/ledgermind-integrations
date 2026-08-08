@@ -1,0 +1,13 @@
+{
+  "action": "merge",
+  "source_value_ids": ["v1", "v2"],
+  "result": {
+    "primary_object_id": "obj-postgresql",
+    "related_object_ids": [],
+    "facet": "experience",
+    "content": "PostgreSQL быстрее SQLite",
+    "scope_text": null,
+    "valid_from": null,
+    "valid_to": null
+  }
+}

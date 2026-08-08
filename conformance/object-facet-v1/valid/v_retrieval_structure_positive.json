@@ -1,0 +1,31 @@
+{
+  "retrieval_request_id": "r3",
+  "items": [
+    {
+      "value_id": "v3",
+      "primary_object_id": "obj-ledgermind-core",
+      "object_name": "LedgerMind Core",
+      "facet": "structure",
+      "content": "Core разделён на модуль хранения и модуль поиска",
+      "relevance": 0.85,
+      "selection_explanation": {
+        "object_reasons": ["canonical_exact"],
+        "facet_activations": [
+          {"facet": "structure", "score": 0.88, "signals": ["модуль", "хранение", "поиск"]},
+          {"facet": "function", "score": 0.6, "signals": ["поиск"]},
+          {"facet": "constraint", "score": 0.4, "signals": []}
+        ],
+        "score_components": {
+          "semantic": 0.87,
+          "object": 0.9,
+          "facet": 0.88,
+          "scope_time": 1.0,
+          "context": 0.6,
+          "recency": 0.5,
+          "support": 0.6,
+          "usage": 0.05
+        }
+      }
+    }
+  ]
+}
