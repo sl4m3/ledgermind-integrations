@@ -233,6 +233,11 @@ def test_retrieval_explanation_keeps_item_facet_out_of_activations() -> None:
             }
         )
 
+    no_object_reason = response.model_dump(mode="json")
+    no_object_reason["items"][0]["explanation"]["object_reasons"] = []
+    parsed = RetrievalResponse.model_validate(no_object_reason)
+    assert parsed.items[0].explanation.object_reasons == []
+
 
 def test_context_view_v2_rejects_legacy_public_item_fields() -> None:
     payload = _load_valid("v_context_view.json")

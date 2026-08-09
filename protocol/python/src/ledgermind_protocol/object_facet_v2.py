@@ -672,7 +672,7 @@ class ScoreComponents(ProtocolModel):
 
 
 class RetrievalExplanation(ProtocolModel):
-    object_reasons: list[ObjectReason] = Field(min_length=1, max_length=MAX_EXPLANATION_REASONS)
+    object_reasons: list[ObjectReason] = Field(max_length=MAX_EXPLANATION_REASONS)
     item_facet: Facet
     activated_facets: list[FacetActivation] = Field(max_length=MAX_REQUESTED_FACETS)
     score_components: ScoreComponents
@@ -822,7 +822,7 @@ def _canonical_payload(payload: object) -> dict[str, Any]:
         raise TypeError("object-facet v2 payload must be an object or ProtocolModel")
     if not isinstance(value, dict):
         raise TypeError("object-facet v2 payload must be an object")
-    return cast(dict[str, Any], value)
+    return value
 
 
 def canonical_json_bytes(payload: object) -> bytes:

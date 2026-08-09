@@ -32,7 +32,6 @@ _SCHEMA_NAMES = {
     "handshake-v1.schema.json",
     "request-envelope-v1.schema.json",
     "response-envelope-v1.schema.json",
-    "projection-event-v1.schema.json",
     "error-v1.schema.json",
     "create-backup-v1.schema.json",
     "validate-backup-v1.schema.json",
@@ -91,10 +90,10 @@ def test_envelopes_reject_unsupported_versions_and_unknown_operations() -> None:
         CoreRequestEnvelope(1, "request-1", "not-an-operation", {}).to_json()
 
 
-def test_projection_operations_are_part_of_core_ipc_v1() -> None:
+def test_removed_projection_operations_are_not_part_of_core_ipc() -> None:
     for operation in ("poll_projection_events", "ack_projection_events"):
-        envelope = CoreRequestEnvelope(1, "request-1", operation, {})
-        assert envelope.to_payload()["operation"] == operation
+        with pytest.raises(ValueError, match="operation"):
+            CoreRequestEnvelope(1, "request-1", operation, {})
 
     with pytest.raises(ValueError, match="error code"):
         CoreError("NOT_A_CORE_ERROR", "bad", "error-1", False)
@@ -105,8 +104,6 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
         {
             "handshake",
             "health",
-            "poll_projection_events",
-            "ack_projection_events",
             "create_backup",
             "validate_backup",
             "prepare_restore",

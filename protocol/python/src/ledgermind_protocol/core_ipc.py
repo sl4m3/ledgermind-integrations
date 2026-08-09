@@ -14,7 +14,6 @@ CORE_IPC_CAPABILITIES = frozenset(
     {
         "coordinated_restore",
         "core_owned_backup",
-        "projection_events",
         "object_facet_memory_v1",
         "operational_pipeline_v1",
         "strict_candidate_binding_v2",
@@ -31,8 +30,6 @@ CORE_IPC_CAPABILITIES = frozenset(
 CORE_IPC_SUPPORTED_OPERATIONS = (
     "handshake",
     "health",
-    "poll_projection_events",
-    "ack_projection_events",
     "create_backup",
     "validate_backup",
     "prepare_restore",
@@ -57,9 +54,21 @@ CORE_IPC_ERROR_CODES = (
     "NOT_FOUND",
     "VERSION_CONFLICT",
     "INTEGRITY_VIOLATION",
+    "STALE_MODEL_TASK",
     "PROTOCOL_VERSION_UNSUPPORTED",
     "STORAGE_UNAVAILABLE",
     "INTERNAL_ERROR",
+    "INVALID_OBJECT_FACET_RESULT",
+    "UNKNOWN_OBJECT_CANDIDATE",
+    "UNKNOWN_FACET",
+    "RAW_ROUND_CONFLICT",
+    "VALUE_CONSOLIDATION_CONFLICT",
+    "EMBEDDING_VERSION_MISMATCH",
+    "OBJECT_IDENTITY_AMBIGUOUS",
+    "OBJECT_SCOPE_MISMATCH",
+    "OBJECT_ALIAS_NOT_IN_SOURCE",
+    "OBJECT_CANDIDATE_NOT_OFFERED",
+    "CONTOUR_JOB_STALE",
 )
 
 

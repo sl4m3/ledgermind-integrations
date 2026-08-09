@@ -61,7 +61,6 @@
       "properties": {
         "object_reasons": {
           "type": "array",
-          "minItems": 1,
           "maxItems": 32,
           "uniqueItems": true,
           "items": {
