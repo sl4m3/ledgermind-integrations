@@ -21,7 +21,12 @@ GATE_PATHS = frozenset(
 METADATA_PATHS = frozenset(
     {"python/pyproject.toml", "protocol/python/pyproject.toml"}
 )
-MIGRATION_COMPAT_PATHS = frozenset()
+MIGRATION_COMPAT_PATHS = frozenset(
+    {
+        "python/src/ledgermind_integrations/runtime/spool_migration.py",
+        "python/tests/test_spool_migration.py",
+    }
+)
 PORCELAIN_PATHS = frozenset({"scripts/release-integrations.py"})
 
 _TOKEN_RE = re.compile(
@@ -32,7 +37,9 @@ _TOKEN_RE = re.compile(
 )
 _URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 _VERSION_FIELD_RE = re.compile(
-    r"(?<![A-Za-z0-9_])[\"']?(?:schema_version|protocol_version)[\"']?"
+    r"(?<![A-Za-z0-9_])[\"']?(?:schema_version|protocol_version|knowledge_schema_version|"
+    r"normalizer_version|facet_catalogue_version|facet_catalogue_schema_version|"
+    r"embedding_model_version|manifest_schema_version|source_schema_version)[\"']?"
     r"(?![A-Za-z0-9_])\s*[:=]\s*"
 )
 _VERSION_FIELD_PATH_SUFFIXES = frozenset(

@@ -56,7 +56,8 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
         manifest.write_text(
             json.dumps(
                 {
-                    "format": "ledgermind-release-manifest-v1",
+                    "format": "ledgermind-release-manifest",
+                    "schema_version": 1,
                     "component": "ledgermind-integrations",
                     "source_commit": commit,
                     "commit_sha": commit,
@@ -116,13 +117,11 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
         self.assertEqual(integrations, ["ledgermind-protocol>=2.0.0a1,<2.1"])
         self.assertEqual(protocol, ["pydantic>=2.7,<3"])
 
-    def test_protocol_source_inventory_is_v2_only(self) -> None:
+    def test_protocol_source_inventory_uses_stable_names(self) -> None:
         protocol_source = ROOT / "protocol" / "python" / "src" / "ledgermind_protocol"
-        self.assertTrue((protocol_source / "object_facet_v2.py").is_file())
-        self.assertFalse((protocol_source / "object_facet_v1.py").exists())
+        self.assertTrue((protocol_source / "object_facet.py").is_file())
         script = SCRIPT.read_text(encoding="utf-8")
-        self.assertIn("ledgermind_protocol/object_facet_v2.py", script)
-        self.assertIn("object_facet_v1.py", script)
+        self.assertIn("ledgermind_protocol/object_facet.py", script)
 
     def test_verify_rejects_changed_artifact(self) -> None:
         commit, timestamp = self._head()

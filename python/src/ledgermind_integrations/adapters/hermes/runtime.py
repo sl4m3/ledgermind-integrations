@@ -19,6 +19,7 @@ from ledgermind_protocol import ContextView
 from ...runtime.client import LedgerMindClient
 from ...runtime.delivery import DeliveryWorker
 from ...runtime.spool import FileSpool
+from ...runtime.spool_migration import migrate_spool
 from ...runtime.worker_loop import HermesWorkerLoop
 from .config import HermesConfig, load_config
 from .hook_contracts import HermesPluginContext
@@ -28,7 +29,7 @@ from .state_db import HermesStateReader
 logger = logging.getLogger(__name__)
 
 MessageId = int | str | None
-_CONTEXT_EXTENSION_KEY = "ledgermind_context_v1"
+_CONTEXT_EXTENSION_KEY = "ledgermind_context"
 _MAX_CONTEXT_IDS = 100
 
 
@@ -58,13 +59,6 @@ class ActiveRoundState:
     tool_calls_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
     completed: bool = False
 
-    @property
-    def events(self) -> list[dict[str, Any]]:
-        """Compatibility view for callers that used the pre-A1 state name."""
-
-        return self.captured_events
-
-
 @dataclass
 class SessionState:
     """Lifecycle bookkeeping that survives while a session is active."""
@@ -91,6 +85,7 @@ class HermesPluginRuntime:
             self.capture, max_attempts=config.max_pending_attempts
         )
         self.state_reader = HermesStateReader(config.state_db_path)
+        migrate_spool(spool)
         self.delivery = DeliveryWorker(spool, client)
         self.loop = HermesWorkerLoop(
             delivery_worker=self.delivery,
@@ -100,9 +95,6 @@ class HermesPluginRuntime:
         )
         self.active_rounds: dict[str, ActiveRoundState] = {}
         self.session_states: dict[str, SessionState] = {}
-        # Keep the old private name as a read-compatible alias for integrations
-        # that inspected runtime state during the pre-A1 implementation.
-        self._rounds = self.active_rounds
         self._lock = threading.RLock()
         self._context_executor = ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="ledgermind-hermes-context"
@@ -159,8 +151,8 @@ class HermesPluginRuntime:
         """Stop only the worker thread; keep the runtime restartable.
 
         ``shutdown`` is the lifecycle boundary that closes the context
-        executor.  Keeping this compatibility method worker-only prevents a
-        session callback from making a plugin instance permanently unusable.
+        executor. Keeping this worker-only method prevents a session callback
+        from making a plugin instance permanently unusable.
         """
 
         with self._lock:
@@ -564,6 +556,7 @@ class HermesPluginRuntime:
                 return None
             return {
                 _CONTEXT_EXTENSION_KEY: {
+                    "schema_version": 1,
                     "retrieval_request_id": retrieval_request_id,
                     "delivered_value_ids": list(state.delivered_value_ids[:_MAX_CONTEXT_IDS]),
                 }

@@ -62,7 +62,7 @@ def build_raw_round(
     normalized = [normalize_event(event, index, round_id) for index, event in enumerate(events)]
     event_ids = [event["event_id"] for event in normalized]
     payload = {
-        "api_version": "2",
+        "schema_version": 2,
         "idempotency_key": "sha256:" + "0" * 64,
         "memory_space_id": memory_space_id,
         "source": {

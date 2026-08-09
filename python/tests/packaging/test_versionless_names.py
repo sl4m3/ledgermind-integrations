@@ -24,7 +24,7 @@ def _load_gate():
 
 
 class IntegrationsVersionlessNamesTests(unittest.TestCase):
-    def test_current_checkout_is_diagnosed_without_rewriting_product_code(self) -> None:
+    def test_current_checkout_is_clean(self) -> None:
         result = subprocess.run(
             [sys.executable, str(SCRIPT)],
             cwd=ROOT,
@@ -32,10 +32,8 @@ class IntegrationsVersionlessNamesTests(unittest.TestCase):
             text=True,
             check=False,
         )
-        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("versionless-name gate:", result.stdout)
-        self.assertIn("schemas/core-ipc/request-envelope-v1.schema.json", result.stdout)
-        self.assertIn("versioned-operation", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("versionless-name gate: clean", result.stdout)
 
     def test_scan_uses_tracked_paths_and_narrow_allowlists(self) -> None:
         gate = _load_gate()

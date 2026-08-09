@@ -1,4 +1,4 @@
-# LedgerMind RawRound v2 Hermes adapter
+# LedgerMind RawRound Hermes adapter
 name: ledgermind-hermes
 version: 0.1.0
 provides_hooks:

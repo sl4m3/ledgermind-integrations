@@ -25,9 +25,9 @@ class _LocalHandler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(length))
         with self.lock:
             self.requests.append((self.path, payload))
-        if self.path == "/v1/context/retrieve":
+        if self.path == "/context/retrieve":
             response: dict[str, Any] = {
-                "api_version": "2",
+                "schema_version": 2,
                 "retrieval_request_id": "retrieval-1",
                 "delivered_value_ids": ["value-1"],
                 "items": [
@@ -56,7 +56,7 @@ class _LocalHandler(BaseHTTPRequestHandler):
                     }
                 ]
             }
-        elif self.path == "/v1/rounds":
+        elif self.path == "/rounds":
             response = {"accepted": True}
         else:
             self.send_response(404)
@@ -173,9 +173,9 @@ def test_register_captures_and_delivers_one_round_without_model_call(
             conversation_history=[],
         )
 
-        _wait_until(lambda: any(path == "/v1/rounds" for path, _ in _LocalHandler.requests))
+        _wait_until(lambda: any(path == "/rounds" for path, _ in _LocalHandler.requests))
         round_payloads = [
-            payload for path, payload in _LocalHandler.requests if path == "/v1/rounds"
+            payload for path, payload in _LocalHandler.requests if path == "/rounds"
         ]
         assert len(round_payloads) == 1
         events = round_payloads[0]["round"]["events"]
@@ -187,6 +187,6 @@ def test_register_captures_and_delivers_one_round_without_model_call(
         ]
         assert events[-1]["role"] == "assistant"
         assert events[-1]["final"] is True
-        assert not any(path == "/v1/models" for path, _ in _LocalHandler.requests)
+        assert not any(path == "/models" for path, _ in _LocalHandler.requests)
     finally:
         runtime.stop()
