@@ -52,6 +52,10 @@ class IntegrationsVersionlessNamesTests(unittest.TestCase):
                     'local = "http://127.0.0.1:8765/v1"\n'
                     "uuid.uuid4();\n"
                 ),
+                "python/src/ledgermind_integrations/runtime/spool_migration.py": (
+                    'legacy = "ledgermind_context_v1"\n'
+                    'operation = "retrieve_context_v2"\n'
+                ),
                 "migrations/0001_historical-v2.sql": "SELECT 1;\n",
                 "scripts/release-integrations.py": 'status = "--porcelain=v1"\n',
             }
@@ -69,11 +73,14 @@ class IntegrationsVersionlessNamesTests(unittest.TestCase):
         self.assertIn("python/pyproject.toml:3:", rendered)
         self.assertIn("python/src/contracts.py:1:", rendered)
         self.assertIn("python/src/contracts.py:3:", rendered)
+        self.assertIn("spool_migration.py:2:", rendered)
         self.assertNotIn("untracked_v9.py", rendered)
         self.assertNotIn("provider.example/v1", rendered)
         self.assertNotIn("new_v4", rendered)
         self.assertNotIn("porcelain=v1", rendered)
         self.assertNotIn("0001_historical-v2.sql:0:", rendered)
+        self.assertNotIn("spool_migration.py:1:", rendered)
+        self.assertNotIn("ledgermind_context_v1", rendered)
 
 
 if __name__ == "__main__":
