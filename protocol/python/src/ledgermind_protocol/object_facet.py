@@ -643,8 +643,6 @@ def validate_raw_round_extensions(
         return extensions
     if not isinstance(extensions, Mapping):
         raise TypeError("RawRound extensions must be an object")
-    if any(key.startswith("ledgermind_context_") for key in extensions):
-        raise ValueError("versioned context extensions are not supported")
     if "ledgermind_context" not in extensions:
         return None
     context = extensions["ledgermind_context"]

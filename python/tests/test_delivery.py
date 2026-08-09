@@ -21,7 +21,7 @@ class FakeClient:
 def test_delivery_sends_only_request_and_completes(tmp_path: Path) -> None:
     spool = FileSpool(tmp_path / "spool")
     payload = {
-        "api_version": "2",
+        "schema_version": 2,
         "memory_space_id": "workspace",
         "source": {},
         "round": {},
@@ -44,7 +44,7 @@ def test_delivery_failure_metadata_does_not_include_exception_payload(tmp_path: 
 
     spool = FileSpool(tmp_path / "spool")
     payload = {
-        "api_version": "2",
+        "schema_version": 2,
         "memory_space_id": "workspace",
         "source": {},
         "round": {},

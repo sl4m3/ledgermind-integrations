@@ -132,12 +132,14 @@ def test_one_retrieval_attaches_only_context_references(tmp_path: Path) -> None:
 
         extension = _ready_payloads(spool)[0]["extensions"]
         assert extension == {
-            "ledgermind_context_v1": {
+            "ledgermind_context": {
+                "schema_version": 1,
                 "retrieval_request_id": "retrieval-1",
                 "delivered_value_ids": ["value-1", "value-2"],
             }
         }
-        assert set(extension["ledgermind_context_v1"]) == {
+        assert set(extension["ledgermind_context"]) == {
+            "schema_version",
             "retrieval_request_id",
             "delivered_value_ids",
         }
@@ -168,8 +170,9 @@ def test_multiple_retrievals_keep_last_request_and_first_seen_ids(tmp_path: Path
 
         _complete(runtime, "session-1", "turn-1")
 
-        context = _ready_payloads(spool)[0]["extensions"]["ledgermind_context_v1"]
+        context = _ready_payloads(spool)[0]["extensions"]["ledgermind_context"]
         assert context == {
+            "schema_version": 1,
             "retrieval_request_id": "retrieval-2",
             "delivered_value_ids": ["value-1", "value-2", "value-3"],
         }
@@ -194,7 +197,7 @@ def test_context_ids_are_deduplicated_and_capped_at_one_hundred(tmp_path: Path) 
 
         _complete(runtime, "session-1", "turn-1")
 
-        context = _ready_payloads(runtime.spool)[0]["extensions"]["ledgermind_context_v1"]
+        context = _ready_payloads(runtime.spool)[0]["extensions"]["ledgermind_context"]
         assert context["delivered_value_ids"] == value_ids
     finally:
         runtime.shutdown()
@@ -216,11 +219,13 @@ def test_context_refs_are_isolated_between_sessions(tmp_path: Path) -> None:
             payload["source"]["session_id"]: payload
             for payload in _ready_payloads(spool)
         }
-        assert payloads["session-1"]["extensions"]["ledgermind_context_v1"] == {
+        assert payloads["session-1"]["extensions"]["ledgermind_context"] == {
+            "schema_version": 1,
             "retrieval_request_id": "retrieval-1",
             "delivered_value_ids": ["value-1"],
         }
-        assert payloads["session-2"]["extensions"]["ledgermind_context_v1"] == {
+        assert payloads["session-2"]["extensions"]["ledgermind_context"] == {
+            "schema_version": 1,
             "retrieval_request_id": "retrieval-2",
             "delivered_value_ids": ["value-2"],
         }
@@ -249,7 +254,8 @@ def test_context_refs_do_not_cross_rounds_in_one_session(tmp_path: Path) -> None
         assert first_state.delivered_value_ids == []
 
         pending = json.loads(next(spool.pending_dir.glob("*.json")).read_text(encoding="utf-8"))
-        assert pending["extensions"]["ledgermind_context_v1"] == {
+        assert pending["extensions"]["ledgermind_context"] == {
+            "schema_version": 1,
             "retrieval_request_id": "retrieval-1",
             "delivered_value_ids": ["value-1"],
         }
@@ -272,7 +278,8 @@ def test_pending_recovery_preserves_context_refs_and_clears_active_state(tmp_pat
         pending_path = next(spool.pending_dir.glob("*.json"))
         pending = json.loads(pending_path.read_text(encoding="utf-8"))
         assert pending["extensions"] == {
-            "ledgermind_context_v1": {
+            "ledgermind_context": {
+                "schema_version": 1,
                 "retrieval_request_id": "retrieval-1",
                 "delivered_value_ids": ["value-1"],
             }
@@ -325,7 +332,8 @@ def test_delivery_retry_preserves_context_extension(tmp_path: Path) -> None:
         retry_path = next(spool.ready_dir.glob("*.json"))
         retry = json.loads(retry_path.read_text(encoding="utf-8"))
         assert retry["request"]["extensions"] == {
-            "ledgermind_context_v1": {
+            "ledgermind_context": {
+                "schema_version": 1,
                 "retrieval_request_id": "retrieval-1",
                 "delivered_value_ids": ["value-1"],
             }
@@ -373,7 +381,8 @@ def test_round_capture_extension_keeps_canonical_digest_behavior() -> None:
         completed_at="2026-08-02T20:01:00Z",
         events=events,
         extensions={
-            "ledgermind_context_v1": {
+            "ledgermind_context": {
+                "schema_version": 1,
                 "retrieval_request_id": "retrieval-1",
                 "delivered_value_ids": ["value-1"],
             }
@@ -387,7 +396,8 @@ def test_round_capture_extension_keeps_canonical_digest_behavior() -> None:
 @pytest.mark.parametrize("field", ["content", "score", "relevance"])
 def test_context_extension_rejects_content_and_scores(field: str) -> None:
     extension = {
-        "ledgermind_context_v1": {
+        "ledgermind_context": {
+            "schema_version": 1,
             "retrieval_request_id": "retrieval-1",
             "delivered_value_ids": ["value-1"],
             field: "secret",

@@ -17,7 +17,7 @@ def _client() -> LedgerMindClient:
 
 def _response() -> dict[str, Any]:
     return {
-        "api_version": "2",
+        "schema_version": 2,
         "retrieval_request_id": "retrieval-1",
         "delivered_value_ids": ["value-1"],
         "items": [
@@ -53,7 +53,7 @@ def test_integration_package_exports_client_boundary() -> None:
     assert ledgermind_integrations.LedgerMindClient is LedgerMindClient
 
 
-def test_client_returns_strict_context_view_v2(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_client_returns_strict_context_view(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client()
     requests: list[dict[str, Any]] = []
 
@@ -70,10 +70,37 @@ def test_client_returns_strict_context_view_v2(monkeypatch: pytest.MonkeyPatch) 
     assert requests == [{"memory_space_id": "space-1", "query": "protocol", "limit": 5}]
 
 
+def test_client_uses_stable_http_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client()
+    paths: list[str] = []
+
+    def request(_method: str, path: str, _payload: dict[str, Any] | None) -> dict[str, Any]:
+        paths.append(path)
+        return {}
+
+    monkeypatch.setattr(client, "_request", request)
+
+    client.ping()
+    client.health_live()
+    client.health_capture_ready()
+    client.health_full_ready()
+    client.health()
+    client.health_details()
+
+    assert paths == [
+        "/ping",
+        "/health/live",
+        "/health/capture-ready",
+        "/health/full-ready",
+        "/health/ready",
+        "/health/details",
+    ]
+
+
 def test_client_rejects_legacy_context_item_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client()
     legacy = {"items": [{"knowledge_id": "k1", "title": "old", "statement": "old"}]}
     monkeypatch.setattr(client, "_request", lambda *_args, **_kwargs: legacy)
 
-    with pytest.raises(LedgerMindResponseError, match="ContextView v2"):
+    with pytest.raises(LedgerMindResponseError, match="ContextView"):
         client.retrieve_context(memory_space_id="space-1", query="protocol")

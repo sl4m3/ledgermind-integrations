@@ -75,7 +75,7 @@ class LedgerMindClient:
     ) -> dict[str, Any]:
         payload = self._request(
             "POST",
-            "/v1/context/retrieve",
+            "/context/retrieve",
             {
                 "memory_space_id": memory_space_id,
                 "query": query,
@@ -85,18 +85,33 @@ class LedgerMindClient:
         try:
             return ContextView.model_validate(payload).model_dump(mode="json")
         except (TypeError, ValueError, ValidationError) as exc:
-            raise LedgerMindResponseError("context response was not ContextView v2") from exc
+            raise LedgerMindResponseError("context response was not ContextView") from exc
 
     def submit_round(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         validated = validate_raw_round(payload)
         return self._request(
             "POST",
-            "/v1/rounds",
+            "/rounds",
             validated.model_dump(mode="json", exclude_none=True),
         )
 
+    def ping(self) -> dict[str, Any]:
+        return self._request("GET", "/ping", None)
+
+    def health_live(self) -> dict[str, Any]:
+        return self._request("GET", "/health/live", None)
+
+    def health_capture_ready(self) -> dict[str, Any]:
+        return self._request("GET", "/health/capture-ready", None)
+
+    def health_full_ready(self) -> dict[str, Any]:
+        return self._request("GET", "/health/full-ready", None)
+
     def health(self) -> dict[str, Any]:
-        return self._request("GET", "/v1/health/ready", None)
+        return self._request("GET", "/health/ready", None)
+
+    def health_details(self) -> dict[str, Any]:
+        return self._request("GET", "/health/details", None)
 
     def _request(self, method: str, path: str, payload: Mapping[str, Any] | None) -> dict[str, Any]:
         body = (
