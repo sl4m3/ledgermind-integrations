@@ -1,5 +1,5 @@
 {
-  "api_version": "2",
+  "schema_version": 2,
   "idempotency_key": "sha256:dc443eb3ce99e4536a930c12851390aa7ba2560282757f66192427afe68e7465",
   "memory_space_id": "workspace_01",
   "source": {

@@ -19,7 +19,7 @@ def test_public_valid_fixture_round_trips() -> None:
         (_ROOT / "conformance" / "valid" / "simple_round.json").read_text(encoding="utf-8")
     )
     request = validate_raw_round(payload)
-    assert request.api_version == "2"
+    assert request.schema_version == 2
     assert request.idempotency_key == request.payload_digest
     assert calculate_payload_digest(request) == request.payload_digest
 

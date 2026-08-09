@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ledgermind-protocol"
 version = "2.0.0a1"
-description = "Public LedgerMind RawRound v2 and ContextView protocol"
+description = "Public LedgerMind RawRound and ContextView protocol"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "COPYING"]
 requires-python = ">=3.10"
