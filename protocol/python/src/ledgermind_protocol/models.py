@@ -114,9 +114,9 @@ class RawRoundBody(ProtocolModel):
 
 
 class RawRoundRequest(ProtocolModel):
-    """Complete immutable structural RawRound v2 capture."""
+    """Complete immutable structural RawRound capture."""
 
-    api_version: Literal["2"] = "2"
+    schema_version: Literal[2] = 2
     idempotency_key: str = Field(pattern=SHA256_CHECKSUM_PATTERN)
     memory_space_id: str = Field(min_length=1, max_length=200)
     source: RawRoundSource
@@ -157,7 +157,7 @@ class RawRoundRequest(ProtocolModel):
                 raise ValueError("every tool_result must reference an existing tool_call")
 
         if self.idempotency_key != self.payload_digest:
-            raise ValueError("idempotency_key must equal payload_digest for RawRound v2")
+            raise ValueError("idempotency_key must equal payload_digest for RawRound")
         from .canonical import calculate_payload_digest
 
         if calculate_payload_digest(self) != self.payload_digest:

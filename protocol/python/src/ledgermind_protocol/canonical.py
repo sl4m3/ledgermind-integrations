@@ -1,4 +1,4 @@
-"""Canonical JSON and digest helpers for RawRound v2."""
+"""Canonical JSON and digest helpers for RawRound."""
 
 from __future__ import annotations
 

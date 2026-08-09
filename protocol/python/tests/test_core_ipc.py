@@ -29,16 +29,16 @@ from ledgermind_protocol.core_ipc import (
 
 _SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "core-ipc"
 _SCHEMA_NAMES = {
-    "handshake-v1.schema.json",
-    "request-envelope-v1.schema.json",
-    "response-envelope-v1.schema.json",
-    "error-v1.schema.json",
-    "create-backup-v1.schema.json",
-    "validate-backup-v1.schema.json",
-    "prepare-restore-v1.schema.json",
-    "begin-restore-v1.schema.json",
-    "commit-restore-v1.schema.json",
-    "rollback-restore-v1.schema.json",
+    "handshake.schema.json",
+    "request-envelope.schema.json",
+    "response-envelope.schema.json",
+    "error.schema.json",
+    "create-backup.schema.json",
+    "validate-backup.schema.json",
+    "prepare-restore.schema.json",
+    "begin-restore.schema.json",
+    "commit-restore.schema.json",
+    "rollback-restore.schema.json",
 }
 
 
@@ -110,14 +110,14 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
             "begin_restore",
             "commit_restore",
             "rollback_restore",
-            "ingest_raw_round_v2",
-            "poll_execution_tasks_v2",
-            "submit_execution_result_v2",
-            "fail_execution_task_v2",
-            "retrieve_context_v2",
-            "record_retrieval_outcome_v2",
-            "run_control_maintenance_v1",
-            "get_object_facet_statistics_v1",
+            "ingest_raw_round",
+            "poll_execution_tasks",
+            "submit_execution_result",
+            "fail_execution_task",
+            "retrieve_context",
+            "record_retrieval_outcome",
+            "run_control_maintenance",
+            "get_object_facet_statistics",
             "shutdown",
         }
     )
@@ -294,10 +294,10 @@ def test_restore_retry_envelopes_keep_transaction_identity() -> None:
 
 def test_restore_schemas_are_closed_objects() -> None:
     for schema_name in (
-        "prepare-restore-v1.schema.json",
-        "begin-restore-v1.schema.json",
-        "commit-restore-v1.schema.json",
-        "rollback-restore-v1.schema.json",
+        "prepare-restore.schema.json",
+        "begin-restore.schema.json",
+        "commit-restore.schema.json",
+        "rollback-restore.schema.json",
     ):
         schema = json.loads((_SCHEMA_ROOT / schema_name).read_text(encoding="utf-8"))
         assert schema["additionalProperties"] is False

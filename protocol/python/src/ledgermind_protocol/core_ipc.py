@@ -1,4 +1,4 @@
-"""Public Core IPC v1 transport contracts for the v2 object-facet runtime."""
+"""Public Core IPC transport contracts for the object-facet runtime."""
 
 from __future__ import annotations
 
@@ -14,17 +14,17 @@ CORE_IPC_CAPABILITIES = frozenset(
     {
         "coordinated_restore",
         "core_owned_backup",
-        "object_facet_memory_v1",
-        "operational_pipeline_v1",
-        "strict_candidate_binding_v2",
-        "generic_execution_tasks_v1",
-        "raw_round_ingest_v2",
-        "context_retrieval_v2",
-        "context_provenance_v1",
-        "stable_sha256_digests_v1",
-        "object_resolution_v1",
-        "explainable_context_v1",
-        "control_contour_v1",
+        "object_facet_memory",
+        "operational_pipeline",
+        "strict_candidate_binding",
+        "generic_execution_tasks",
+        "raw_round_ingest",
+        "context_retrieval",
+        "context_provenance",
+        "stable_sha256_digests",
+        "object_resolution",
+        "explainable_context",
+        "control_contour",
     }
 )
 CORE_IPC_SUPPORTED_OPERATIONS = (
@@ -36,14 +36,14 @@ CORE_IPC_SUPPORTED_OPERATIONS = (
     "begin_restore",
     "commit_restore",
     "rollback_restore",
-    "ingest_raw_round_v2",
-    "poll_execution_tasks_v2",
-    "submit_execution_result_v2",
-    "fail_execution_task_v2",
-    "retrieve_context_v2",
-    "record_retrieval_outcome_v2",
-    "run_control_maintenance_v1",
-    "get_object_facet_statistics_v1",
+    "ingest_raw_round",
+    "poll_execution_tasks",
+    "submit_execution_result",
+    "fail_execution_task",
+    "retrieve_context",
+    "record_retrieval_outcome",
+    "run_control_maintenance",
+    "get_object_facet_statistics",
     "shutdown",
 )
 CORE_IPC_OPERATIONS = frozenset(CORE_IPC_SUPPORTED_OPERATIONS)

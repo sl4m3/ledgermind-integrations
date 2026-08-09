@@ -1,0 +1,20 @@
+{
+  "protocol": "object-facet",
+  "canonical_version": "1",
+  "canonical": "sha256 over typed model, nulls omitted, keys sorted, compact",
+  "valid": {
+    "v_context_extension.json": "sha256:2d174a7012f19c1409421d7e45ce0cf0b56c59a85725a4e9df9b78d5033103fc",
+    "v_context_view.json": "sha256:07edde8000e41b6a73743fba9001ef5005f74a870e7d022d13701f38f89577aa",
+    "v_extraction_ambiguous.json": "sha256:cf03fae163a626612a3903190945dac86f340e1c66cf54804ebe5d6e633ff084",
+    "v_extraction_existing.json": "sha256:18f3d662dbc7345694d7808000b7c006622db742f28feb8813558ae182d0dce8",
+    "v_extraction_extended_name.json": "sha256:f906304e8d0c90a17008125802fc3466a9ab3eeee82b71cdf815d8e46a2017d2",
+    "v_extraction_new.json": "sha256:f9c0b816e3916d23ef45f829c6cf863dd98190b2b3e45cbde5241532bb30f926",
+    "v_ingest_request.json": "sha256:f868f1d71d6494d8f475cd9f8b5dbf94084e9248a32c644ca8fb835406715a51",
+    "v_operational_input.json": "sha256:ca872c1f8be031240aa10a414dbde82145bd25939c792759fe7b99ee4fb46217",
+    "v_retrieval_direct_semantic.json": "sha256:77d67462a85d30835a8a281444818fff4822ecdff682226c75138536c2eb44d8",
+    "v_retrieval_outcome.json": "sha256:c8c2c5427bab686380e771f04e9cdb8669fab54d2c4e7d10701eb580cc2c65cf",
+    "v_retrieval_request.json": "sha256:23eebdee18f36b967f616a327fc650aefec468391b53887b9a95aa06714bbbd6",
+    "v_task_embed.json": "sha256:fe347ba256f4008cdfd2330e4a2631a0079b51143ec3ded74b130b218dd0bd26",
+    "v_task_generate.json": "sha256:eefe24303da04eaa5ba01df3a816fdd8d978a45b9d61f34aeb799a5b155f115a"
+  }
+}
