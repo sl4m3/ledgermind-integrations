@@ -5,8 +5,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from ledgermind_protocol import validate_raw_round, with_payload_digest
-from ledgermind_protocol.object_facet_v2 import validate_raw_round_extensions
+from ledgermind_protocol import (
+    validate_raw_round,
+    validate_raw_round_extensions,
+    with_payload_digest,
+)
 
 
 def _content(value: object) -> list[dict[str, Any]]:

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ledgermind_protocol import ContextView
+
 from ...runtime.client import LedgerMindClient
 from ...runtime.delivery import DeliveryWorker
 from ...runtime.spool import FileSpool
@@ -203,9 +205,12 @@ class HermesPluginRuntime:
             return None
         if not isinstance(response, Mapping):
             return None
-        context = self._format_context(response)
-        if context:
-            self._record_context_retrieval(state, response)
+        try:
+            context_view = ContextView.model_validate(response)
+        except (TypeError, ValueError):
+            return None
+        self._record_context_retrieval(state, context_view)
+        context = self._format_context(context_view)
         return {"context": context} if context else None
 
     def on_pre_tool_call(self, **kwargs: Any) -> None:
@@ -535,32 +540,17 @@ class HermesPluginRuntime:
         return metadata
 
     def _record_context_retrieval(
-        self, state: ActiveRoundState, response: Mapping[str, Any]
+        self, state: ActiveRoundState, response: ContextView
     ) -> None:
-        retrieval_request_id = response.get("retrieval_request_id")
-        if not isinstance(retrieval_request_id, str) or not retrieval_request_id.strip():
-            return
-        items = response.get("items")
-        if not isinstance(items, list):
-            return
         with self._lock:
             if state.completed:
                 return
-            state.retrieval_request_id = retrieval_request_id.strip()
+            state.retrieval_request_id = response.retrieval_request_id
             known_ids = set(state.delivered_value_ids)
-            for item in items:
-                if not isinstance(item, Mapping):
-                    continue
-                _, statement = self._context_item_text(item)
-                if not statement:
-                    continue
-                value_id = item.get("value_id")
-                if not isinstance(value_id, str):
-                    continue
-                normalized_value_id = value_id.strip()
+            for item in response.items:
+                normalized_value_id = item.value_id
                 if (
-                    not normalized_value_id
-                    or normalized_value_id in known_ids
+                    normalized_value_id in known_ids
                     or len(state.delivered_value_ids) >= _MAX_CONTEXT_IDS
                 ):
                     continue
@@ -719,18 +709,14 @@ class HermesPluginRuntime:
         return None
 
     @staticmethod
-    def _format_context(response: Mapping[str, Any]) -> str:
-        items = response.get("items")
-        if not isinstance(items, list):
-            return ""
+    def _format_context(response: ContextView) -> str:
         lines: list[str] = []
-        for item in items:
-            if not isinstance(item, Mapping):
-                continue
-            title, statement = HermesPluginRuntime._context_item_text(item)
-            if not statement:
-                continue
-            lines.append(f"- {title}: {statement}" if title else f"- {statement}")
+        for item in response.items:
+            reasons = ", ".join(item.explanation.object_reasons)
+            lines.append(
+                f"- {item.object_name} [{item.facet}; relevance={item.relevance:.3f}; "
+                f"reasons={reasons}]: {item.content}"
+            )
         if not lines:
             return ""
         return (
@@ -738,18 +724,5 @@ class HermesPluginRuntime:
             + "\n".join(lines)
             + "\n[/LEDGERMIND CONTEXT]"
         )
-
-    @staticmethod
-    def _context_item_text(item: Mapping[str, Any]) -> tuple[str, str]:
-        title_value = item.get("object_name")
-        if title_value is None:
-            title_value = item.get("title", "")
-        statement_value = item.get("content")
-        if statement_value is None:
-            statement_value = item.get("statement", "")
-        title = title_value.strip() if isinstance(title_value, str) else ""
-        statement = statement_value.strip() if isinstance(statement_value, str) else ""
-        return title, statement
-
 
 __all__ = ["ActiveRoundState", "HermesPluginRuntime", "SessionState"]

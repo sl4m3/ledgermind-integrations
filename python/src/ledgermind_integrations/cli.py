@@ -26,3 +26,7 @@ def main(argv: list[str] | None = None) -> int:
         print(uninstall_hermes(args.destination))
         return 0
     parser.error("unsupported command")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

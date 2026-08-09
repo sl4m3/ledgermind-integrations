@@ -31,7 +31,6 @@ def _default_config() -> dict[str, object]:
         "endpoint": "http://127.0.0.1:8765",
         "token_file": "~/.ledgermind/local/server.token",
         "memory_space_id": "project-main",
-        "processing_profile_id": "default",
         "source_instance_id": f"hermes-{uuid4().hex}",
         "profile_id": "default",
         "state_db_path": str(hermes_home / "state.db"),

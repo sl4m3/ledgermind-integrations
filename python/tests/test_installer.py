@@ -22,7 +22,6 @@ def test_installer_writes_plugin_manifest(tmp_path: Path) -> None:
         "endpoint",
         "token_file",
         "memory_space_id",
-        "processing_profile_id",
         "source_instance_id",
         "profile_id",
         "state_db_path",

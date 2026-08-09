@@ -9,10 +9,15 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
+from ledgermind_protocol.context import ContextView
 from ledgermind_protocol.object_facet_v2 import (
+    GenericExecutionTask,
+    IngestRawRoundRequest,
     OperationalExtractionInput,
     OperationalExtractionResult,
     RawRoundContextExtension,
+    RecordRetrievalOutcome,
+    RetrievalRequest,
     RetrievalResponse,
     canonical_digest,
     validate_raw_round_extensions,
@@ -29,7 +34,13 @@ _VALID_MODELS = {
     "v_extraction_ambiguous.json": OperationalExtractionResult,
     "v_extraction_extended_name.json": OperationalExtractionResult,
     "v_context_extension.json": RawRoundContextExtension,
+    "v_context_view.json": ContextView,
+    "v_ingest_request.json": IngestRawRoundRequest,
+    "v_retrieval_request.json": RetrievalRequest,
     "v_retrieval_direct_semantic.json": RetrievalResponse,
+    "v_retrieval_outcome.json": RecordRetrievalOutcome,
+    "v_task_embed.json": GenericExecutionTask,
+    "v_task_generate.json": GenericExecutionTask,
 }
 _INPUT_INVALID = {
     "i_nine_candidates.json",
@@ -74,6 +85,12 @@ def test_schema_inventory_is_v2_only_and_strict() -> None:
         "operational-extraction-input-v2.schema.json",
         "operational-extraction-result-v2.schema.json",
         "raw-round-context-v1.schema.json",
+        "context-view-v2.schema.json",
+        "generic-execution-task-v2.schema.json",
+        "ingest-raw-round-request-v2.schema.json",
+        "ingest-raw-round-response-v2.schema.json",
+        "retrieval-request-v2.schema.json",
+        "record-retrieval-outcome-v2.schema.json",
         "retrieval-response-v2.schema.json",
     }
     assert {path.name for path in _SCHEMAS.glob("*.json")} == expected
@@ -87,6 +104,7 @@ def test_schema_inventory_is_v2_only_and_strict() -> None:
 def test_valid_fixtures_validate_and_match_typed_digests() -> None:
     digests = _load(_FIXTURES / "digests.json")
     assert digests["protocol"] == "object-facet-v2"
+    assert digests["canonical_version"] == "1"
     assert set(digests["valid"]) == set(_VALID_MODELS)
     for name, model_type in _VALID_MODELS.items():
         model = model_type.model_validate(_load_valid(name))
@@ -214,6 +232,36 @@ def test_retrieval_explanation_keeps_item_facet_out_of_activations() -> None:
                 ],
             }
         )
+
+
+def test_context_view_v2_rejects_legacy_public_item_fields() -> None:
+    payload = _load_valid("v_context_view.json")
+    item = payload["items"][0]
+    item["knowledge_id"] = "legacy-id"
+    with pytest.raises(ValidationError):
+        ContextView.model_validate(payload)
+
+
+def test_generic_task_keeps_operation_opaque_and_rejects_cross_kind_requests() -> None:
+    task = GenericExecutionTask.model_validate(_load_valid("v_task_generate.json"))
+    assert task.operation == "core_owned_operation"
+    with pytest.raises(ValidationError):
+        GenericExecutionTask.model_validate(
+            {
+                **task.model_dump(mode="json", exclude_none=True),
+                "embedding_request": {
+                    "texts": ["text"],
+                    "purpose": "retrieval_query",
+                },
+            }
+        )
+
+
+def test_retrieval_request_requires_project_for_repository() -> None:
+    payload = _load_valid("v_retrieval_request.json")
+    payload.pop("project_id")
+    with pytest.raises(ValidationError, match="project id"):
+        RetrievalRequest.model_validate(payload)
 
 
 def test_v2_result_rejects_source_kind_even_when_the_value_is_otherwise_valid() -> None:

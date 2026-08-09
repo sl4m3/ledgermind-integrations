@@ -18,7 +18,6 @@ class HermesConfig:
     spool_dir: str
     adapter_version: str = "hermes-python/0.1.0"
     source_schema_version: int = 1
-    processing_profile_id: str = "default"
     allow_remote: bool = False
     context_limit: int = 5
     context_timeout_seconds: float = 1.5
@@ -51,7 +50,6 @@ def load_config(path: str | Path) -> HermesConfig:
         spool_dir=str(payload.get("spool_dir", "~/.ledgermind/hermes-spool")),
         adapter_version=str(payload.get("adapter_version", "hermes-python/0.1.0")),
         source_schema_version=int(payload.get("source_schema_version", 1)),
-        processing_profile_id=str(payload.get("processing_profile_id", "default")),
         allow_remote=bool(payload.get("allow_remote", False)),
         context_limit=max(int(payload.get("context_limit", 5)), 1),
         context_timeout_seconds=max(float(payload.get("context_timeout_seconds", 1.5)), 0.1),

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v1/record-retrieval-outcome-v1.schema.json",
-  "title": "LedgerMind object-facet v1 record retrieval outcome",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v2/record-retrieval-outcome-v2.schema.json",
+  "title": "LedgerMind object-facet v2 retrieval outcome",
   "type": "object",
   "additionalProperties": false,
   "required": ["retrieval_request_id", "candidate_value_ids", "delivered_value_ids", "created_at"],
@@ -10,15 +10,15 @@
     "candidate_value_ids": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 500,
-      "items": {"type": "string", "minLength": 1, "maxLength": 500},
-      "uniqueItems": true
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 500}
     },
     "delivered_value_ids": {
       "type": "array",
-      "maxItems": 500,
-      "items": {"type": "string", "minLength": 1, "maxLength": 500},
-      "uniqueItems": true
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 500}
     },
     "created_at": {"type": "string", "format": "date-time"}
   }

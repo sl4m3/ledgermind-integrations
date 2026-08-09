@@ -19,7 +19,6 @@ from ledgermind_protocol.core_ipc import (
     CoreRequestEnvelope,
     CoreResponseEnvelope,
     CreateBackupPayload,
-    FailModelTaskPayload,
     HandshakeResultPayload,
     PrepareRestorePayload,
     PrepareRestoreResultPayload,
@@ -33,15 +32,8 @@ _SCHEMA_NAMES = {
     "handshake-v1.schema.json",
     "request-envelope-v1.schema.json",
     "response-envelope-v1.schema.json",
-    "accept-hypothesis-v1.schema.json",
-    "retrieve-context-v1.schema.json",
-    "context-view-v1.schema.json",
-    "record-context-usage-v1.schema.json",
-    "model-task-v1.schema.json",
-    "model-result-v1.schema.json",
     "projection-event-v1.schema.json",
     "error-v1.schema.json",
-    "fail-model-task-v1.schema.json",
     "create-backup-v1.schema.json",
     "validate-backup-v1.schema.json",
     "prepare-restore-v1.schema.json",
@@ -108,25 +100,13 @@ def test_projection_operations_are_part_of_core_ipc_v1() -> None:
         CoreError("NOT_A_CORE_ERROR", "bad", "error-1", False)
 
 
-def test_model_task_operations_are_part_of_core_ipc_v1() -> None:
-    for operation in ("poll_model_tasks", "submit_model_result", "fail_model_task"):
-        envelope = CoreRequestEnvelope(1, "request-1", operation, {})
-        assert envelope.to_payload()["operation"] == operation
-
-
 def test_complete_core_operation_inventory_is_advertisable() -> None:
     assert CORE_IPC_OPERATIONS == frozenset(
         {
             "handshake",
             "health",
-            "accept_hypothesis",
-            "retrieve_context",
-            "record_context_usage",
             "poll_projection_events",
             "ack_projection_events",
-            "poll_model_tasks",
-            "submit_model_result",
-            "fail_model_task",
             "create_backup",
             "validate_backup",
             "prepare_restore",
@@ -153,6 +133,7 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
     )
     payload = handshake.to_payload()
     assert payload["knowledge_schema_version"] == CORE_KNOWLEDGE_SCHEMA_VERSION
+    assert CORE_KNOWLEDGE_SCHEMA_VERSION == 11
     capabilities = payload["capabilities"]
     assert isinstance(capabilities, dict)
     assert capabilities["core_owned_backup"] is True
@@ -160,17 +141,6 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
 
 
 def test_failure_and_backup_payloads_round_trip() -> None:
-    failure = FailModelTaskPayload(
-        memory_space_id="space-1",
-        task_id="task-1",
-        worker_id="worker-1",
-        error_code="provider_timeout",
-        retryable=True,
-        retry_after_seconds=30,
-        failed_at="2026-08-04T12:00:00Z",
-    )
-    assert FailModelTaskPayload.from_payload(failure.to_payload()) == failure
-
     validate = ValidateBackupPayload(
         relative_path="exchange/incoming/snapshot.sqlite",
         sha256="sha256:" + "a" * 64,

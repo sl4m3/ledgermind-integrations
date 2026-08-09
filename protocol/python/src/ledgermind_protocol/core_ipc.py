@@ -1,4 +1,4 @@
-"""Public Core IPC v1 envelope contracts."""
+"""Public Core IPC v1 transport contracts for the v2 object-facet runtime."""
 
 from __future__ import annotations
 
@@ -9,17 +9,20 @@ from pathlib import PurePosixPath
 from typing import Any, ClassVar
 
 CORE_IPC_PROTOCOL_VERSION = 1
-CORE_KNOWLEDGE_SCHEMA_VERSION = 9
+CORE_KNOWLEDGE_SCHEMA_VERSION = 11
 CORE_IPC_CAPABILITIES = frozenset(
     {
         "coordinated_restore",
         "core_owned_backup",
-        "model_task_failure_reporting",
         "projection_events",
         "object_facet_memory_v1",
+        "operational_pipeline_v1",
+        "strict_candidate_binding_v2",
         "generic_execution_tasks_v1",
         "raw_round_ingest_v2",
         "context_retrieval_v2",
+        "context_provenance_v1",
+        "stable_sha256_digests_v1",
         "object_resolution_v1",
         "explainable_context_v1",
         "control_contour_v1",
@@ -28,14 +31,8 @@ CORE_IPC_CAPABILITIES = frozenset(
 CORE_IPC_SUPPORTED_OPERATIONS = (
     "handshake",
     "health",
-    "accept_hypothesis",
-    "retrieve_context",
-    "record_context_usage",
     "poll_projection_events",
     "ack_projection_events",
-    "poll_model_tasks",
-    "submit_model_result",
-    "fail_model_task",
     "create_backup",
     "validate_backup",
     "prepare_restore",
@@ -55,12 +52,10 @@ CORE_IPC_SUPPORTED_OPERATIONS = (
 CORE_IPC_OPERATIONS = frozenset(CORE_IPC_SUPPORTED_OPERATIONS)
 CORE_IPC_ERROR_CODES = (
     "INVALID_REQUEST",
-    "INVALID_HYPOTHESIS",
     "IDEMPOTENCY_CONFLICT",
     "MEMORY_SPACE_MISMATCH",
     "NOT_FOUND",
     "VERSION_CONFLICT",
-    "STALE_MODEL_TASK",
     "INTEGRITY_VIOLATION",
     "PROTOCOL_VERSION_UNSUPPORTED",
     "STORAGE_UNAVAILABLE",
@@ -71,12 +66,6 @@ CORE_IPC_ERROR_CODES = (
 def _require_text(value: object, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must not be empty")
-    return value
-
-
-def _require_non_negative_int(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        raise ValueError(f"{name} must be a non-negative integer")
     return value
 
 
@@ -389,123 +378,6 @@ class HandshakeResultPayload:
             ),
             supported_operations=tuple(operations),
             capabilities=dict(capabilities),
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class FailModelTaskPayload:
-    memory_space_id: str
-    task_id: str
-    worker_id: str
-    error_code: str
-    retryable: bool
-    retry_after_seconds: int
-    failed_at: str
-
-    def __post_init__(self) -> None:
-        _require_text(self.memory_space_id, "memory space id")
-        _require_text(self.task_id, "task id")
-        _require_text(self.worker_id, "worker id")
-        _require_text(self.error_code, "error code")
-        if not isinstance(self.retryable, bool):
-            raise TypeError("retryable must be a boolean")
-        if isinstance(self.retry_after_seconds, bool) or not isinstance(self.retry_after_seconds, int):
-            raise TypeError("retry_after_seconds must be an integer")
-        if not 0 <= self.retry_after_seconds <= 86_400:
-            raise ValueError("retry_after_seconds must be between 0 and 86400")
-        _require_rfc3339(self.failed_at, "failed_at")
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "memory_space_id": self.memory_space_id,
-            "task_id": self.task_id,
-            "worker_id": self.worker_id,
-            "error_code": self.error_code,
-            "retryable": self.retryable,
-            "retry_after_seconds": self.retry_after_seconds,
-            "failed_at": self.failed_at,
-        }
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> FailModelTaskPayload:
-        payload = _strict_object(
-            payload,
-            {
-                "memory_space_id",
-                "task_id",
-                "worker_id",
-                "error_code",
-                "retryable",
-                "retry_after_seconds",
-                "failed_at",
-            },
-            "fail model task",
-        )
-        return cls(
-            memory_space_id=payload["memory_space_id"],
-            task_id=payload["task_id"],
-            worker_id=payload["worker_id"],
-            error_code=payload["error_code"],
-            retryable=payload["retryable"],
-            retry_after_seconds=payload["retry_after_seconds"],
-            failed_at=payload["failed_at"],
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class FailModelTaskResultPayload:
-    status: str
-    attempts: int
-    available_at: str | None
-    last_error_code: str | None
-    failed_at: str | None
-    completed_at: str | None
-
-    def __post_init__(self) -> None:
-        if self.status not in {"pending", "failed"}:
-            raise ValueError("model task failure status is invalid")
-        _require_non_negative_int(self.attempts, "attempts")
-        for value, name in (
-            (self.available_at, "available_at"),
-            (self.failed_at, "failed_at"),
-            (self.completed_at, "completed_at"),
-        ):
-            if value is not None:
-                _require_rfc3339(value, name)
-        if self.last_error_code is not None:
-            _require_text(self.last_error_code, "last error code")
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "status": self.status,
-            "attempts": self.attempts,
-            "available_at": self.available_at,
-            "last_error_code": self.last_error_code,
-            "failed_at": self.failed_at,
-            "completed_at": self.completed_at,
-        }
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, Any]) -> FailModelTaskResultPayload:
-        payload = _strict_object(
-            payload,
-            {
-                "status",
-                "attempts",
-                "available_at",
-                "last_error_code",
-                "failed_at",
-                "completed_at",
-            },
-            "fail model task result",
-        )
-        return cls(
-            status=payload["status"],
-            attempts=payload["attempts"],
-            available_at=payload["available_at"],
-            last_error_code=payload["last_error_code"],
-            failed_at=payload["failed_at"],
-            completed_at=payload["completed_at"],
         )
 
 
@@ -854,8 +726,6 @@ __all__ = [
     "CoreRequestEnvelope",
     "CoreResponseEnvelope",
     "CreateBackupPayload",
-    "FailModelTaskPayload",
-    "FailModelTaskResultPayload",
     "HandshakeResultPayload",
     "PrepareRestorePayload",
     "PrepareRestoreResultPayload",

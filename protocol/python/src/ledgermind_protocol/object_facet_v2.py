@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import unicodedata
 from collections.abc import Mapping, Sequence
@@ -35,6 +36,14 @@ MAX_EXPLANATION_REASONS = 32
 MAX_EXPLANATION_SIGNALS = 32
 MAX_REQUESTED_FACETS = 14
 MAX_CONTEXT_IDS = 100
+MAX_TASK_MESSAGES = 256
+MAX_OUTPUT_TOKENS = 262_144
+MAX_EMBEDDING_TEXTS = 512
+MAX_EMBEDDING_DIMENSIONS = 8_192
+MAX_EMBEDDING_VECTORS = 512
+MAX_EMBEDDING_ABSOLUTE_VALUE = 1_000_000.0
+MAX_EMBEDDING_TEXT_LENGTH = 2_000
+MAX_RETRIEVAL_OUTCOME_IDS = 100
 
 Facet: TypeAlias = Literal[
     "identity",
@@ -65,6 +74,19 @@ ObjectReason: TypeAlias = Literal[
     "conversation_match",
     "direct_value_semantic",
 ]
+IngestStatus: TypeAlias = Literal["queued", "processing", "completed", "failed"]
+TaskKind: TypeAlias = Literal["generate_json", "embed_texts"]
+ProfileSlot: TypeAlias = Literal["operational", "background", "embedding"]
+EmbeddingPurpose: TypeAlias = Literal[
+    "object_query",
+    "object_mention",
+    "object_card",
+    "value_record",
+    "retrieval_query",
+    "facet_catalog",
+]
+ResponseFormat: TypeAlias = Literal["json_object", "text"]
+ExplanationLevel: TypeAlias = Literal["compact", "none"]
 
 FACET_VALUES = frozenset(
     {
@@ -112,7 +134,7 @@ def _require_text(value: str, name: str, maximum: int) -> None:
         raise ValueError(f"{name} must be a non-empty string of at most {maximum} characters")
 
 
-def _validate_unique(values: Sequence[str], name: str) -> None:
+def _validate_unique(values: Sequence[object], name: str) -> None:
     if len(set(values)) != len(values):
         raise ValueError(f"{name} must be unique")
 
@@ -123,6 +145,13 @@ def _validate_ids(values: list[str], name: str, maximum: int, *, minimum: int = 
     for value in values:
         _require_identifier(value, name.rstrip("s"))
     _validate_unique(values, name)
+
+
+def _require_sha256_digest(value: str, name: str) -> None:
+    if len(value) != 71 or not value.startswith("sha256:") or any(
+        character not in "0123456789abcdef" for character in value[7:]
+    ):
+        raise ValueError(f"{name} must be a lowercase sha256 digest")
 
 
 def _validate_validity_window(valid_from: str | None, valid_to: str | None) -> None:
@@ -150,27 +179,30 @@ def _normalize_for_comparison(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value)
     normalized = normalized.translate(
         str.maketrans(
-            {
-                "\u2010": "-",
-                "\u2011": "-",
-                "\u2012": "-",
-                "\u2013": "-",
-                "\u2014": "-",
-                "\u2015": "-",
-                "\u2043": "-",
-                "\u2212": "-",
-                "\ufe58": "-",
-                "\ufe63": "-",
-                "\uff0d": "-",
-                "\u2018": "'",
-                "\u2019": "'",
-                "\u201a": "'",
-                "\u201b": "'",
-                "\u201c": '"',
-                "\u201d": '"',
-                "\u201e": '"',
-                "\u201f": '"',
-            }
+            cast(
+                dict[str, str | int | None],
+                {
+                    "\u2010": "-",
+                    "\u2011": "-",
+                    "\u2012": "-",
+                    "\u2013": "-",
+                    "\u2014": "-",
+                    "\u2015": "-",
+                    "\u2043": "-",
+                    "\u2212": "-",
+                    "\ufe58": "-",
+                    "\ufe63": "-",
+                    "\uff0d": "-",
+                    "\u2018": "'",
+                    "\u2019": "'",
+                    "\u201a": "'",
+                    "\u201b": "'",
+                    "\u201c": '"',
+                    "\u201d": '"',
+                    "\u201e": '"',
+                    "\u201f": '"',
+                },
+            )
         )
     )
     normalized = " ".join(normalized.casefold().split())
@@ -184,6 +216,79 @@ def _normalized_contains(text: str, needle: str) -> bool:
 
 def _component_count(value: str) -> int:
     return len(_normalize_for_comparison(value).split())
+
+
+class ModelRequest(ProtocolModel):
+    """Opaque generate-json request prepared by Core."""
+
+    messages: list[dict[str, Any]] = Field(min_length=1, max_length=MAX_TASK_MESSAGES)
+    max_output_tokens: int = Field(ge=1, le=MAX_OUTPUT_TOKENS)
+    response_format: ResponseFormat
+
+    @model_validator(mode="after")
+    def validate_messages(self) -> ModelRequest:
+        for message in self.messages:
+            if not isinstance(message, dict):
+                raise TypeError("model messages must be objects")
+        return self
+
+
+class EmbeddingRequest(ProtocolModel):
+    """Opaque embedding request prepared by Core."""
+
+    texts: list[str] = Field(min_length=1, max_length=MAX_EMBEDDING_TEXTS)
+    purpose: EmbeddingPurpose
+    dimensions: int | None = Field(default=None, ge=1, le=MAX_EMBEDDING_DIMENSIONS)
+
+    @model_validator(mode="after")
+    def validate_texts(self) -> EmbeddingRequest:
+        for text in self.texts:
+            if not text.strip() or len(text) > MAX_EMBEDDING_TEXT_LENGTH:
+                raise ValueError(
+                    "embedding text must be a non-empty string of at most "
+                    f"{MAX_EMBEDDING_TEXT_LENGTH} characters"
+                )
+        return self
+
+
+class GenericExecutionTask(ProtocolModel):
+    """Technical v2 task; operation and operation_input remain Core-owned."""
+
+    task_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    task_kind: TaskKind
+    operation: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    profile_slot: ProfileSlot
+    memory_space_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    expires_at: str
+    lease: str | None = None
+    model_request: ModelRequest | None = None
+    embedding_request: EmbeddingRequest | None = None
+    operation_input: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_task(self) -> GenericExecutionTask:
+        _parse_rfc3339(self.expires_at, "expires_at")
+        if self.lease is not None:
+            _parse_rfc3339(self.lease, "lease")
+        if self.task_kind == "generate_json":
+            if self.profile_slot not in {"operational", "background"}:
+                raise ValueError(
+                    "generate_json task requires an operational or background profile slot"
+                )
+            if self.model_request is None:
+                raise ValueError("generate_json task requires model_request")
+            if self.embedding_request is not None:
+                raise ValueError("generate_json task forbids embedding_request")
+        else:
+            if self.profile_slot != "embedding":
+                raise ValueError("embed_texts task requires the embedding profile slot")
+            if self.embedding_request is None:
+                raise ValueError("embed_texts task requires embedding_request")
+            if self.model_request is not None:
+                raise ValueError("embed_texts task forbids model_request")
+        if self.operation_input is not None and not isinstance(self.operation_input, dict):
+            raise TypeError("operation_input must be an object")
+        return self
 
 
 class ResolutionContext(ProtocolModel):
@@ -217,6 +322,28 @@ class ResolutionContext(ProtocolModel):
                 minimum=0,
             )
         return self
+
+
+class IngestRawRoundRequest(ProtocolModel):
+    """Core command wrapper for an already validated RawRound v2 payload."""
+
+    command_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    idempotency_key: str
+    memory_space_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    raw_round: dict[str, Any]
+    resolution_context: ResolutionContext | None = None
+
+    @model_validator(mode="after")
+    def validate_request(self) -> IngestRawRoundRequest:
+        _require_sha256_digest(self.idempotency_key, "idempotency key")
+        return self
+
+
+class IngestRawRoundResponse(ProtocolModel):
+    raw_round_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    duplicate: bool
+    operational_job_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    status: IngestStatus
 
 
 class ObjectCandidate(ProtocolModel):
@@ -417,14 +544,16 @@ class OperationalExtractionResult(ProtocolModel):
 
         mentions_by_ref = {mention.mention_ref: mention for mention in inputs.mentions}
         for object_ in self.objects:
-            mention = mentions_by_ref.get(object_.mention_ref)
-            if mention is None:
+            selected_mention = mentions_by_ref.get(object_.mention_ref)
+            if selected_mention is None:
                 raise ValueError(f"unknown mention ref {object_.mention_ref}")
-            candidates = {candidate.object_id: candidate for candidate in mention.candidates}
+            candidates = {
+                candidate.object_id: candidate for candidate in selected_mention.candidates
+            }
             for event_id in object_.source_event_ids:
                 if event_id not in known_events:
                     raise ValueError(f"unknown source event {event_id}")
-            if mention.source_event_id not in object_.source_event_ids:
+            if selected_mention.source_event_id not in object_.source_event_ids:
                 raise ValueError("object source_event_ids must include the mention source event")
 
             if object_.resolution == "existing":
@@ -465,11 +594,11 @@ class OperationalExtractionResult(ProtocolModel):
                 if not 1 <= components <= 4:
                     raise ValueError("canonical name must contain between 1 and 4 components")
                 if components >= 3:
-                    event_id = object_.canonical_name_source_event_id
-                    if event_id is None:
+                    evidence_event_id = object_.canonical_name_source_event_id
+                    if evidence_event_id is None:
                         raise ValueError("extended canonical name requires source evidence")
                     if not _normalized_contains(
-                        source_events[event_id],
+                        source_events[evidence_event_id],
                         object_.new_canonical_name,
                     ):
                         raise ValueError(
@@ -575,6 +704,45 @@ class RetrievalItem(ProtocolModel):
         return self
 
 
+class RetrievalRequest(ProtocolModel):
+    """Core retrieval request v2 with the query embedding supplied by Local."""
+
+    memory_space_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    query_text: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+    query_embedding: list[float] = Field(min_length=1, max_length=MAX_EMBEDDING_DIMENSIONS)
+    embedding_model_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    embedding_model_version: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    limit: int = Field(ge=1, le=MAX_RETRIEVAL_ITEMS)
+    project_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    repository_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    task_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    conversation_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=MAX_IDENTIFIER_LENGTH,
+    )
+    related_object_ids: list[str] | None = None
+    requested_facets: list[Facet] | None = None
+    explanation_level: ExplanationLevel = "compact"
+
+    @model_validator(mode="after")
+    def validate_request(self) -> RetrievalRequest:
+        if any(
+            not math.isfinite(component) or abs(component) > MAX_EMBEDDING_ABSOLUTE_VALUE
+            for component in self.query_embedding
+        ):
+            raise ValueError("query_embedding values must be finite and bounded")
+        if self.repository_id is not None and self.project_id is None:
+            raise ValueError("repository id requires a matching project id")
+        if self.related_object_ids is not None:
+            _validate_ids(self.related_object_ids, "related_object_ids", MAX_RELATED_REFS, minimum=0)
+        if self.requested_facets is not None:
+            if len(self.requested_facets) > MAX_REQUESTED_FACETS:
+                raise ValueError(f"requested_facets must not exceed {MAX_REQUESTED_FACETS} entries")
+            _validate_unique(self.requested_facets, "requested_facets")
+        return self
+
+
 class RetrievalResponse(ProtocolModel):
     retrieval_request_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     items: list[RetrievalItem] = Field(max_length=MAX_RETRIEVAL_ITEMS)
@@ -583,6 +751,66 @@ class RetrievalResponse(ProtocolModel):
     def validate_response(self) -> RetrievalResponse:
         _require_identifier(self.retrieval_request_id, "retrieval request id")
         return self
+
+
+class RecordRetrievalOutcome(ProtocolModel):
+    retrieval_request_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    candidate_value_ids: list[str] = Field(min_length=1, max_length=MAX_RETRIEVAL_OUTCOME_IDS)
+    delivered_value_ids: list[str] = Field(max_length=MAX_RETRIEVAL_OUTCOME_IDS)
+    created_at: str
+
+    @model_validator(mode="after")
+    def validate_outcome(self) -> RecordRetrievalOutcome:
+        _parse_rfc3339(self.created_at, "created_at")
+        _validate_ids(self.candidate_value_ids, "candidate_value_ids", MAX_RETRIEVAL_OUTCOME_IDS)
+        _validate_ids(
+            self.delivered_value_ids,
+            "delivered_value_ids",
+            MAX_RETRIEVAL_OUTCOME_IDS,
+            minimum=0,
+        )
+        if not set(self.delivered_value_ids).issubset(set(self.candidate_value_ids)):
+            raise ValueError("delivered_value_ids must be a subset of candidate_value_ids")
+        return self
+
+
+class EmbedResult(ProtocolModel):
+    task_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    model_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    model_version: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    dimensions: int = Field(ge=1, le=MAX_EMBEDDING_DIMENSIONS)
+    vectors: list[list[float]] = Field(min_length=1, max_length=MAX_EMBEDDING_VECTORS)
+
+    @model_validator(mode="after")
+    def validate_result(self) -> EmbedResult:
+        for index, vector in enumerate(self.vectors):
+            if len(vector) != self.dimensions:
+                raise ValueError(
+                    f"vector {index} dimension {len(vector)} does not match "
+                    f"declared dimensions {self.dimensions}"
+                )
+            if any(
+                not math.isfinite(component) or abs(component) > MAX_EMBEDDING_ABSOLUTE_VALUE
+                for component in vector
+            ):
+                raise ValueError(f"vector {index} contains a non-finite or unbounded value")
+        return self
+
+    def validate_for_request(self, request: EmbeddingRequest) -> None:
+        if len(self.vectors) != len(request.texts):
+            raise ValueError(
+                f"vectors count {len(self.vectors)} must equal texts count {len(request.texts)}"
+            )
+        if request.dimensions is not None and self.dimensions != request.dimensions:
+            raise ValueError(
+                f"dimensions {self.dimensions} must match the requested dimensions "
+                f"{request.dimensions}"
+            )
+
+
+RetrievalRequestV2 = RetrievalRequest
+RetrievalResponseV2 = RetrievalResponse
+GenericExecutionTaskV2 = GenericExecutionTask
 
 
 def _canonical_payload(payload: object) -> dict[str, Any]:
@@ -615,28 +843,50 @@ calculate_object_facet_digest = canonical_digest
 __all__ = [
     "FACET_VALUES",
     "MAX_CONTEXT_IDS",
-    "MAX_MENTION_CANDIDATES",
+    "MAX_EMBEDDING_DIMENSIONS",
+    "MAX_EMBEDDING_TEXTS",
+    "MAX_EMBEDDING_VECTORS",
     "MAX_MENTIONS",
+    "MAX_MENTION_CANDIDATES",
+    "MAX_OUTPUT_TOKENS",
+    "MAX_TASK_MESSAGES",
     "OBJECT_REASON_VALUES",
-    "OperationalExtractionInput",
-    "OperationalExtractionResult",
-    "ObjectCandidate",
+    "EmbedResult",
+    "EmbeddingPurpose",
+    "EmbeddingRequest",
+    "ExplanationLevel",
+    "ExtractedValue",
     "Facet",
     "FacetActivation",
+    "GenericExecutionTask",
+    "GenericExecutionTaskV2",
+    "IngestRawRoundRequest",
+    "IngestRawRoundResponse",
+    "IngestStatus",
     "LedgermindContextV1",
     "MentionResolutionInput",
+    "ModelRequest",
+    "ObjectCandidate",
     "ObjectReason",
     "ObjectResolution",
+    "OperationalExtractionInput",
+    "OperationalExtractionResult",
+    "ProfileSlot",
     "RawRoundContextExtension",
+    "RecordRetrievalOutcome",
     "ResolutionContext",
     "ResolvedObject",
+    "ResponseFormat",
     "RetrievalExplanation",
     "RetrievalItem",
+    "RetrievalRequest",
+    "RetrievalRequestV2",
     "RetrievalResponse",
+    "RetrievalResponseV2",
     "ScoreComponents",
-    "ExtractedValue",
+    "TaskKind",
+    "calculate_object_facet_digest",
     "canonical_digest",
     "canonical_json_bytes",
-    "calculate_object_facet_digest",
     "validate_raw_round_extensions",
 ]

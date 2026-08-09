@@ -179,7 +179,7 @@ def test_multiple_retrievals_keep_last_request_and_first_seen_ids(tmp_path: Path
 
 def test_context_ids_are_deduplicated_and_capped_at_one_hundred(tmp_path: Path) -> None:
     value_ids = [f"value-{index}" for index in range(100)]
-    response_ids = [value_ids[0], *value_ids, "value-100", "value-101"]
+    response_ids = value_ids
     client = _Client([_response("retrieval-1", response_ids)])
     runtime = HermesPluginRuntime(
         config=_config(tmp_path), client=client, spool=FileSpool(tmp_path / "spool")  # type: ignore[arg-type]

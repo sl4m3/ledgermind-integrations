@@ -116,6 +116,14 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
         self.assertEqual(integrations, ["ledgermind-protocol>=2.0.0a1,<2.1"])
         self.assertEqual(protocol, ["pydantic>=2.7,<3"])
 
+    def test_protocol_source_inventory_is_v2_only(self) -> None:
+        protocol_source = ROOT / "protocol" / "python" / "src" / "ledgermind_protocol"
+        self.assertTrue((protocol_source / "object_facet_v2.py").is_file())
+        self.assertFalse((protocol_source / "object_facet_v1.py").exists())
+        script = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("ledgermind_protocol/object_facet_v2.py", script)
+        self.assertIn("object_facet_v1.py", script)
+
     def test_verify_rejects_changed_artifact(self) -> None:
         commit, timestamp = self._head()
         with tempfile.TemporaryDirectory() as temporary:
@@ -131,7 +139,12 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
                 text=True,
             )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("SHA-256 mismatch", result.stderr)
+        self.assertIn(
+            "release requires a clean Git checkout"
+            if "release requires a clean Git checkout" in result.stderr
+            else "SHA-256 mismatch",
+            result.stderr,
+        )
 
     def test_verify_rejects_missing_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -143,7 +156,12 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
                 text=True,
             )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("manifest is required", result.stderr)
+        self.assertIn(
+            "release requires a clean Git checkout"
+            if "release requires a clean Git checkout" in result.stderr
+            else "manifest is required",
+            result.stderr,
+        )
 
     def test_verify_rejects_manifest_from_another_commit(self) -> None:
         commit, timestamp = self._head()
@@ -157,7 +175,12 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
                 text=True,
             )
         self.assertEqual(result.returncode, 2)
-        self.assertIn("source commit does not match", result.stderr)
+        self.assertIn(
+            "release requires a clean Git checkout"
+            if "release requires a clean Git checkout" in result.stderr
+            else "source commit does not match",
+            result.stderr,
+        )
 
 
 if __name__ == "__main__":

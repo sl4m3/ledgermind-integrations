@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v1/ingest-raw-round-response-v1.schema.json",
-  "title": "LedgerMind object-facet v1 ingest raw round response",
+  "$id": "https://ledgermind.dev/schemas/core-ipc/object-facet-v2/ingest-raw-round-response-v2.schema.json",
+  "title": "LedgerMind object-facet v2 RawRound ingest response",
   "type": "object",
   "additionalProperties": false,
   "required": ["raw_round_id", "duplicate", "operational_job_id", "status"],

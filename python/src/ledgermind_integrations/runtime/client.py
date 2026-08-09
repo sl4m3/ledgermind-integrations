@@ -10,7 +10,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from ledgermind_protocol import validate_raw_round
+from ledgermind_protocol import ContextView, validate_raw_round
+from pydantic import ValidationError
 
 
 class LedgerMindClientError(RuntimeError):
@@ -72,16 +73,19 @@ class LedgerMindClient:
     def retrieve_context(
         self, *, memory_space_id: str, query: str, limit: int = 5
     ) -> dict[str, Any]:
-        return self._request(
+        payload = self._request(
             "POST",
             "/v1/context/retrieve",
             {
-                "api_version": "1",
                 "memory_space_id": memory_space_id,
                 "query": query,
                 "limit": int(limit),
             },
         )
+        try:
+            return ContextView.model_validate(payload).model_dump(mode="json")
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise LedgerMindResponseError("context response was not ContextView v2") from exc
 
     def submit_round(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         validated = validate_raw_round(payload)

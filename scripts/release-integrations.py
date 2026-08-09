@@ -44,8 +44,12 @@ PROTOCOL_REQUIRED_WHEEL_FILES = {
     "ledgermind_protocol/context.py",
     "ledgermind_protocol/core_ipc.py",
     "ledgermind_protocol/models.py",
+    "ledgermind_protocol/object_facet_v2.py",
     "ledgermind_protocol/validation.py",
     "ledgermind_protocol/py.typed",
+}
+PROTOCOL_FORBIDDEN_PACKAGE_FILES = {
+    "ledgermind_protocol/object_facet_v1.py",
 }
 INTEGRATIONS_REQUIRED_WHEEL_FILES = {
     "ledgermind_integrations/__init__.py",
@@ -63,6 +67,7 @@ REQUIRED_SOURCE_ASSETS = {
     Path("schemas/raw-round-v2.schema.json"),
     Path("conformance/valid/hermes_complete.json"),
     Path("conformance/digests/raw_round_v2.json"),
+    Path("conformance/object-facet-v2/digests.json"),
 }
 _GENERATED_DIR_NAMES = {
     "build",
@@ -288,6 +293,9 @@ def _validate_wheel(wheel: Path, package: str, required: set[str]) -> None:
     missing = sorted(required - name_set)
     if missing:
         raise ReleaseError(f"{package} wheel is missing required package data: {missing}")
+    forbidden = sorted(PROTOCOL_FORBIDDEN_PACKAGE_FILES & name_set)
+    if package == "ledgermind-protocol" and forbidden:
+        raise ReleaseError(f"{package} wheel contains removed legacy files: {forbidden}")
     normalized = package.replace("-", "_")
     if not any(name.startswith(f"{normalized}-") and name.endswith(".dist-info/METADATA") for name in names):
         raise ReleaseError(f"{package} wheel is missing dist-info metadata")
@@ -339,6 +347,8 @@ def _validate_sdist(sdist: Path, package: str, required: set[str]) -> None:
     for name in names:
         path = Path(name)
         lower_name = name.lower()
+        if package == "ledgermind-protocol" and path.name == "object_facet_v1.py":
+            raise ReleaseError(f"{package} sdist contains a removed legacy file: {name}")
         if any(component in _GENERATED_DIR_NAMES for component in path.parts[1:]):
             raise ReleaseError(f"generated path in sdist: {name}")
         if path.suffix.lower() in _GENERATED_FILE_SUFFIXES:

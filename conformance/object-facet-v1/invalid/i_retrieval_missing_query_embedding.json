@@ -1,8 +1,0 @@
-{
-  "memory_space_id": "space-ledgermind",
-  "query_text": "Как устроен LedgerMind?",
-  "limit": 10,
-  "project_id": "project-ledgermind",
-  "repository_id": "repo-ledgermind",
-  "explanation_level": "compact"
-}
