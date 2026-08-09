@@ -1,12 +1,12 @@
 # ledgermind-integrations
 
 `ledgermind-integrations` — открытый client-side слой LedgerMind для
-захвата RawRound v2. Он не является Local и не содержит закрытый Core.
+захвата RawRound. Он не является Local и не содержит закрытый Core.
 
 ## Capture-only runtime
 
 - Интеграции наблюдают только данные, доступные в клиенте, и собирают один
-  неизменяемый завершённый `RawRound v2`: сообщения, tool calls/results,
+  неизменяемый завершённый `RawRound` с `schema_version=2`: сообщения, tool calls/results,
   границы раунда и provenance.
 - Они не извлекают semantic fields, не создают Hypothesis/Atom и не принимают
   решения о knowledge.
@@ -19,7 +19,7 @@
 После валидации и canonical digest интеграция может доставить RawRound через
 публичный protocol на выбранный пользователем endpoint:
 
-- локальный Local endpoint, обычно `POST /v1/rounds`;
+- локальный Local endpoint, обычно `POST /rounds`;
 - выбранный пользователем Cloud endpoint с тем же public contract.
 
 Адрес, authentication и egress policy задаются владельцем установки. Поэтому

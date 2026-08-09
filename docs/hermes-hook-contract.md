@@ -29,4 +29,5 @@ exceptions in `PluginManager.invoke_hook`.
 - Hermes sends plugin-hook diagnostics to its own logging path; LedgerMind does
   not log raw arguments, results, conversation payloads, or provider secrets.
 - `conversation_history` is treated as a read-only sequence. The adapter keeps
-  its own in-memory round state and produces one validated RawRound v2.
+  its own in-memory round state and produces one validated RawRound with
+  `schema_version=2`.

@@ -44,12 +44,9 @@ PROTOCOL_REQUIRED_WHEEL_FILES = {
     "ledgermind_protocol/context.py",
     "ledgermind_protocol/core_ipc.py",
     "ledgermind_protocol/models.py",
-    "ledgermind_protocol/object_facet_v2.py",
+    "ledgermind_protocol/object_facet.py",
     "ledgermind_protocol/validation.py",
     "ledgermind_protocol/py.typed",
-}
-PROTOCOL_FORBIDDEN_PACKAGE_FILES = {
-    "ledgermind_protocol/object_facet_v1.py",
 }
 INTEGRATIONS_REQUIRED_WHEEL_FILES = {
     "ledgermind_integrations/__init__.py",
@@ -61,13 +58,14 @@ INTEGRATIONS_REQUIRED_WHEEL_FILES = {
     "ledgermind_integrations/runtime/client.py",
     "ledgermind_integrations/runtime/delivery.py",
     "ledgermind_integrations/runtime/spool.py",
+    "ledgermind_integrations/runtime/spool_migration.py",
     "ledgermind_integrations/runtime/worker_loop.py",
 }
 REQUIRED_SOURCE_ASSETS = {
-    Path("schemas/raw-round-v2.schema.json"),
+    Path("schemas/raw-round.schema.json"),
     Path("conformance/valid/hermes_complete.json"),
-    Path("conformance/digests/raw_round_v2.json"),
-    Path("conformance/object-facet-v2/digests.json"),
+    Path("conformance/digests/raw_round.json"),
+    Path("conformance/object-facet/digests.json"),
 }
 _GENERATED_DIR_NAMES = {
     "build",
@@ -293,9 +291,14 @@ def _validate_wheel(wheel: Path, package: str, required: set[str]) -> None:
     missing = sorted(required - name_set)
     if missing:
         raise ReleaseError(f"{package} wheel is missing required package data: {missing}")
-    forbidden = sorted(PROTOCOL_FORBIDDEN_PACKAGE_FILES & name_set)
-    if package == "ledgermind-protocol" and forbidden:
-        raise ReleaseError(f"{package} wheel contains removed legacy files: {forbidden}")
+    if package == "ledgermind-protocol":
+        unstable_modules = sorted(
+            name for name in names if Path(name).name.startswith("object_facet_")
+        )
+        if unstable_modules:
+            raise ReleaseError(
+                f"{package} wheel contains unstable object-facet modules: {unstable_modules}"
+            )
     normalized = package.replace("-", "_")
     if not any(name.startswith(f"{normalized}-") and name.endswith(".dist-info/METADATA") for name in names):
         raise ReleaseError(f"{package} wheel is missing dist-info metadata")
@@ -344,11 +347,17 @@ def _validate_sdist(sdist: Path, package: str, required: set[str]) -> None:
     missing = sorted(f"{root}/{name}" for name in required_names if f"{root}/{name}" not in names)
     if missing:
         raise ReleaseError(f"{package} sdist is missing required source files: {missing}")
+    if package == "ledgermind-protocol":
+        unstable_modules = sorted(
+            name for name in names if Path(name).name.startswith("object_facet_")
+        )
+        if unstable_modules:
+            raise ReleaseError(
+                f"{package} sdist contains unstable object-facet modules: {unstable_modules}"
+            )
     for name in names:
         path = Path(name)
         lower_name = name.lower()
-        if package == "ledgermind-protocol" and path.name == "object_facet_v1.py":
-            raise ReleaseError(f"{package} sdist contains a removed legacy file: {name}")
         if any(component in _GENERATED_DIR_NAMES for component in path.parts[1:]):
             raise ReleaseError(f"generated path in sdist: {name}")
         if path.suffix.lower() in _GENERATED_FILE_SUFFIXES:
@@ -485,8 +494,10 @@ def _smoke_install(
                 "import importlib, inspect; "
                 "importlib.import_module('ledgermind_protocol'); "
                 "runtime = importlib.import_module('ledgermind_integrations.adapters.hermes.runtime'); "
+                "migration = importlib.import_module('ledgermind_integrations.runtime.spool_migration'); "
                 "assert hasattr(runtime, 'ActiveRoundState'); "
                 "assert hasattr(runtime.HermesPluginRuntime, 'finish_session'); "
+                "assert hasattr(migration, 'migrate_spool'); "
                 "assert 'active_rounds' in inspect.getsource(runtime.HermesPluginRuntime)"
             ),
         ),
@@ -503,6 +514,7 @@ def _smoke_install(
             "ledgermind_protocol",
             "ledgermind_integrations.adapters.hermes.runtime.ActiveRoundState",
             "ledgermind_integrations.adapters.hermes.runtime.HermesPluginRuntime.finish_session",
+            "ledgermind_integrations.runtime.spool_migration.migrate_spool",
             "active_rounds correlation state",
         ],
         "cli": [
@@ -601,7 +613,8 @@ def build(args: argparse.Namespace) -> Path:
 
     records, digests = _artifact_records(output, copied_names)
     manifest = {
-        "format": "ledgermind-release-manifest-v1",
+        "format": "ledgermind-release-manifest",
+        "schema_version": 1,
         "component": COMPONENT,
         "source_commit": commit,
         "commit_sha": commit,
@@ -665,8 +678,10 @@ def verify(args: argparse.Namespace) -> Path:
         raise ReleaseError("unexpected project names in Integrations workspace")
     path = _manifest_path(args, integrations_version, commit)
     manifest = _load_manifest(path)
-    if manifest.get("format") != "ledgermind-release-manifest-v1":
+    if manifest.get("format") != "ledgermind-release-manifest":
         raise ReleaseError("manifest format is not supported")
+    if manifest.get("schema_version") != 1:
+        raise ReleaseError("manifest schema_version is not supported")
     if manifest.get("component") != COMPONENT:
         raise ReleaseError("manifest component does not match Integrations")
     if manifest.get("source_commit") != commit or manifest.get("commit_sha") != commit:
