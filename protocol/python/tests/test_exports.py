@@ -13,6 +13,12 @@ def test_public_exports_are_boundary_models() -> None:
         "RetrievalRequest",
         "RetrievalResponse",
         "RawRoundRequest",
+        "ClaimCondition",
+        "ClaimCoverage",
+        "ClaimExtractionOutput",
+        "ClaimSubject",
+        "ExtractedClaim",
+        "OperationalClaimOutput",
     }
     assert expected <= set(protocol.__all__)
     assert protocol.ContextView.model_fields["schema_version"].default == 2
@@ -22,6 +28,7 @@ def test_public_exports_are_boundary_models() -> None:
         "object_name",
         "facet",
         "content",
+        "source_event_ids",
         "relevance",
         "explanation",
     }

@@ -7,6 +7,8 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ledgermind_protocol import LedgerMindResolution, build_resolution_extension
+
 from ...runtime.spool import FileSpool
 from .config import HermesConfig
 from .round_capture import build_raw_round
@@ -33,6 +35,8 @@ class HermesRoundCapture:
         events: Sequence[Mapping[str, Any]],
         pending_metadata: Mapping[str, Any] | None = None,
         extensions: Mapping[str, Any] | None = None,
+        source_extensions: Mapping[str, Any] | None = None,
+        resolution: Mapping[str, Any] | LedgerMindResolution | None = None,
     ) -> Path:
         pending = dict(pending_metadata or {})
         effective_extensions = extensions
@@ -42,6 +46,36 @@ class HermesRoundCapture:
                 effective_extensions = candidate
         if effective_extensions is not None:
             pending["extensions"] = dict(effective_extensions)
+        effective_source_extensions = source_extensions
+        if effective_source_extensions is None:
+            candidate = pending.get("source_extensions")
+            if isinstance(candidate, Mapping):
+                effective_source_extensions = candidate
+        if effective_source_extensions is None:
+            effective_source_extensions = {
+                "ledgermind_resolution": self.resolution_extension(
+                    session_id,
+                    metadata=pending_metadata,
+                    resolution=resolution,
+                )
+            }
+        else:
+            effective_source_extensions = dict(effective_source_extensions)
+            if "ledgermind_resolution" not in effective_source_extensions:
+                effective_source_extensions["ledgermind_resolution"] = (
+                    self.resolution_extension(
+                        session_id,
+                        metadata=pending_metadata,
+                        resolution=resolution,
+                    )
+                )
+            if resolution is not None:
+                effective_source_extensions["ledgermind_resolution"] = (
+                    resolution.model_dump(mode="json")
+                    if isinstance(resolution, LedgerMindResolution)
+                    else LedgerMindResolution.model_validate(resolution).model_dump(mode="json")
+                )
+        pending["source_extensions"] = dict(effective_source_extensions)
         if not events or not any(bool(event.get("final")) for event in events):
             pending.setdefault("session_id", session_id)
             pending.setdefault("round_id", round_id)
@@ -82,10 +116,36 @@ class HermesRoundCapture:
             completed_at=completed_at,
             events=events,
             extensions=effective_extensions,
+            source_extensions=effective_source_extensions,
             adapter_version=self.config.adapter_version,
             source_schema_version=self.config.source_schema_version,
         )
         return self.spool.enqueue_ready(payload["idempotency_key"], payload)
+
+    def resolution_extension(
+        self,
+        session_id: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        resolution: Mapping[str, Any] | LedgerMindResolution | None = None,
+    ) -> dict[str, object]:
+        if isinstance(resolution, LedgerMindResolution):
+            values = resolution.model_dump(mode="json")
+            values["conversation_id"] = session_id
+            return LedgerMindResolution.model_validate(values).model_dump(mode="json")
+        merged: dict[str, Any] = dict(metadata or {})
+        if resolution is not None:
+            merged.update(dict(resolution))
+        return build_resolution_extension(
+            session_id,
+            metadata=merged,
+            project_id=self.config.project_id,
+            repository_id=self.config.repository_id,
+            task_id=self.config.task_id,
+            working_directory=self.config.working_directory,
+            repository_root=self.config.repository_root,
+            repository_mapping=self.config.repository_mapping,
+        )
 
 
 class PendingCaptureWorker:
@@ -142,6 +202,16 @@ class PendingCaptureWorker:
                         pending.get("extensions")
                         if isinstance(pending.get("extensions"), Mapping)
                         else None
+                    ),
+                    source_extensions=(
+                        pending.get("source_extensions")
+                        if isinstance(pending.get("source_extensions"), Mapping)
+                        else {
+                            "ledgermind_resolution": self.capture.resolution_extension(
+                                str(pending["session_id"]),
+                                metadata=pending,
+                            )
+                        }
                     ),
                     adapter_version=self.capture.config.adapter_version,
                     source_schema_version=self.capture.config.source_schema_version,

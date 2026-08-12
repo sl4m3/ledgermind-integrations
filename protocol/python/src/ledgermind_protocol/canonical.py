@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, cast
@@ -24,7 +25,12 @@ def _normalize_rfc3339(value: object) -> object:
         return value
     if parsed.tzinfo is None:
         return value
-    return parsed.isoformat().replace("+00:00", "Z")
+    normalized = parsed.isoformat().replace("+00:00", "Z")
+    match = re.fullmatch(r"(?P<head>.*)\.(?P<fraction>\d+)(?P<zone>Z|[+-]\d{2}:\d{2})", normalized)
+    if match is None:
+        return normalized
+    fraction = match.group("fraction").rstrip("0")
+    return f"{match.group('head')}{('.' + fraction) if fraction else ''}{match.group('zone')}"
 
 
 def _as_mapping(payload: object) -> dict[str, Any]:

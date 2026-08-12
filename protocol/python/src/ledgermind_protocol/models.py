@@ -71,6 +71,28 @@ class RawRoundEvent(ProtocolModel):
         return self
 
 
+class LedgerMindResolution(ProtocolModel):
+    """Versioned, source-owned work identity for object resolution."""
+
+    schema_version: Literal[1]
+    project_id: str | None = Field(min_length=1, max_length=500)
+    repository_id: str | None = Field(min_length=1, max_length=500)
+    task_id: str | None = Field(min_length=1, max_length=500)
+    conversation_id: str | None = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> LedgerMindResolution:
+        for value, name in (
+            (self.project_id, "project_id"),
+            (self.repository_id, "repository_id"),
+            (self.task_id, "task_id"),
+            (self.conversation_id, "conversation_id"),
+        ):
+            if value is not None and not value.strip():
+                raise ValueError(f"{name} must not be empty")
+        return self
+
+
 class RawRoundSource(ProtocolModel):
     system: str = Field(min_length=1, max_length=100)
     instance_id: str = Field(min_length=1, max_length=300)
@@ -88,6 +110,8 @@ class RawRoundSource(ProtocolModel):
     def validate_event_ids(self) -> RawRoundSource:
         if len(set(self.event_ids)) != len(self.event_ids):
             raise ValueError("source.event_ids must be unique")
+        if self.extensions is not None and "ledgermind_resolution" in self.extensions:
+            LedgerMindResolution.model_validate(self.extensions["ledgermind_resolution"])
         return self
 
 
@@ -126,6 +150,8 @@ class RawRoundRequest(ProtocolModel):
 
     @model_validator(mode="after")
     def validate_complete_round(self) -> RawRoundRequest:
+        if self.extensions is not None and "ledgermind_resolution" in self.extensions:
+            raise ValueError("ledgermind_resolution belongs in source.extensions")
         events = self.round.events
         event_ids = [event.event_id for event in events]
         if self.source.event_ids != event_ids:
@@ -167,6 +193,7 @@ class RawRoundRequest(ProtocolModel):
 
 __all__ = [
     "SHA256_CHECKSUM_PATTERN",
+    "LedgerMindResolution",
     "ProtocolModel",
     "RawContentPart",
     "RawRoundBody",

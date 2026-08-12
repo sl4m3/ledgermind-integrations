@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from ledgermind_protocol.context import ContextView
 from ledgermind_protocol.object_facet import (
+    ClaimExtractionOutput,
     GenericExecutionTask,
     IngestRawRoundRequest,
     OperationalExtractionInput,
@@ -28,6 +29,8 @@ _FIXTURES = _ROOT / "conformance" / "object-facet"
 _SCHEMAS = _ROOT / "schemas" / "core-ipc" / "object-facet"
 
 _VALID_MODELS = {
+    "v_claim_extraction.json": ClaimExtractionOutput,
+    "v_claim_extraction_empty.json": ClaimExtractionOutput,
     "v_operational_input.json": OperationalExtractionInput,
     "v_extraction_existing.json": OperationalExtractionResult,
     "v_extraction_new.json": OperationalExtractionResult,
@@ -40,6 +43,7 @@ _VALID_MODELS = {
     "v_retrieval_direct_semantic.json": RetrievalResponse,
     "v_retrieval_outcome.json": RecordRetrievalOutcome,
     "v_task_embed.json": GenericExecutionTask,
+    "v_task_subject_query.json": GenericExecutionTask,
     "v_task_generate.json": GenericExecutionTask,
 }
 _INPUT_INVALID = {
@@ -84,7 +88,10 @@ def test_schema_inventory_is_versionless_and_strict() -> None:
     expected = {
         "operational-extraction-input.schema.json",
         "operational-extraction-result.schema.json",
+        "claim-operational-extraction-input.schema.json",
+        "claim-operational-extraction-result.schema.json",
         "raw-round-context.schema.json",
+        "raw-round-resolution.schema.json",
         "context-view.schema.json",
         "generic-execution-task.schema.json",
         "ingest-raw-round-request.schema.json",
@@ -146,6 +153,32 @@ def test_extraction_results_bind_to_candidates_and_source_events() -> None:
         result.validate_with_source(inputs, events)
 
 
+def test_claim_results_bind_exact_subject_and_condition_evidence() -> None:
+    result = ClaimExtractionOutput.model_validate(_load_valid("v_claim_extraction.json"))
+    result.validate_with_source(_load_events())
+    result.validate_coverage_against(["r1"])
+
+    invalid_span = _load_valid("v_claim_extraction.json")
+    invalid_span["claims"][0]["subject"]["span_start"] = 19
+    with pytest.raises(ValidationError):
+        ClaimExtractionOutput.model_validate(invalid_span)
+
+    invalid_condition = _load_valid("v_claim_extraction.json")
+    invalid_condition["claims"][0]["conditions"][0]["surface_text"] = "not in source"
+    parsed = ClaimExtractionOutput.model_validate(invalid_condition)
+    with pytest.raises(ValueError, match="exact source substring"):
+        parsed.validate_with_source(_load_events())
+
+
+def test_claim_output_allows_empty_claims_and_forbids_unknown_fields() -> None:
+    empty = ClaimExtractionOutput.model_validate(_load_valid("v_claim_extraction_empty.json"))
+    assert empty.claims == []
+    payload = _load_valid("v_claim_extraction_empty.json")
+    payload["unexpected"] = True
+    with pytest.raises(ValidationError):
+        ClaimExtractionOutput.model_validate(payload)
+
+
 def test_event_specific_alias_and_extended_name_require_the_selected_event() -> None:
     inputs = _load_input()
     events = _load_events()
@@ -186,13 +219,23 @@ def test_all_invalid_fixtures_are_rejected() -> None:
         elif path.name in {"i_unknown_facet.json", "i_source_kind.json"}:
             with pytest.raises(ValidationError):
                 OperationalExtractionResult.model_validate(payload)
+        elif path.name in {
+            "i_claim_duplicate_ref.json",
+            "i_claim_unknown_coverage_ref.json",
+        }:
+            with pytest.raises((ValidationError, ValueError)):
+                ClaimExtractionOutput.model_validate(payload)
+        elif path.name == "i_claim_subject_inside_condition.json":
+            claim_result = ClaimExtractionOutput.model_validate(payload)
+            with pytest.raises(ValueError, match="contained in a condition"):
+                claim_result.validate_with_source(_load_events())
         else:
             raise AssertionError(f"no parser for {path.name}")
 
 
 def test_context_extension_has_schema_and_ids_only() -> None:
     context = validate_raw_round_extensions(_load_valid("v_context_extension.json"))
-    assert context is not None
+    assert isinstance(context, RawRoundContextExtension)
     assert context.ledgermind_context.schema_version == 1
     assert context.ledgermind_context.retrieval_request_id == "retrieval-1"
     assert context.ledgermind_context.delivered_value_ids == ["value-1", "value-2"]
@@ -251,6 +294,16 @@ def test_context_view_rejects_legacy_public_item_fields() -> None:
 def test_generic_task_keeps_operation_opaque_and_rejects_cross_kind_requests() -> None:
     task = GenericExecutionTask.model_validate(_load_valid("v_task_generate.json"))
     assert task.operation == "core_owned_operation"
+    for operation in ("extract_claims", "resolve_subjects", "semantic_repair"):
+        claim_task = GenericExecutionTask.model_validate(
+            {
+                **task.model_dump(mode="json", exclude_none=True),
+                "operation": operation,
+                "operation_input": {"claims": [], "coverage": []},
+            }
+        )
+        assert claim_task.operation == operation
+        assert claim_task.operation_input == {"claims": [], "coverage": []}
     with pytest.raises(ValidationError):
         GenericExecutionTask.model_validate(
             {
@@ -261,6 +314,22 @@ def test_generic_task_keeps_operation_opaque_and_rejects_cross_kind_requests() -
                 },
             }
         )
+
+    embedding_task = GenericExecutionTask.model_validate(_load_valid("v_task_embed.json"))
+    assert embedding_task.embedding_request is not None
+    embedding_request = embedding_task.embedding_request.model_dump(mode="json")
+    embedding_task = GenericExecutionTask.model_validate(
+        {
+            **embedding_task.model_dump(mode="json", exclude_none=True),
+            "operation": "embed_texts",
+            "embedding_request": {
+                **embedding_request,
+                "purpose": "subject_query",
+            },
+        }
+    )
+    assert embedding_task.embedding_request is not None
+    assert embedding_task.embedding_request.purpose == "subject_query"
 
 
 def test_retrieval_request_requires_project_for_repository() -> None:

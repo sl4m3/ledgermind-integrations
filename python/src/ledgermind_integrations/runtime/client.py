@@ -113,7 +113,25 @@ class LedgerMindClient:
     def health_details(self) -> dict[str, Any]:
         return self._request("GET", "/health/details", None)
 
+    def runtime_acquire(self, *, client: str, session_id: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/runtime/acquire",
+            {"client": client, "session_id": session_id},
+        )
+
+    def runtime_heartbeat(self, lease_id: str) -> dict[str, Any]:
+        return self._request("POST", "/runtime/heartbeat", {"lease_id": lease_id})
+
+    def runtime_release(self, lease_id: str) -> dict[str, Any]:
+        return self._request("POST", "/runtime/release", {"lease_id": lease_id})
+
+    def runtime_status(self) -> dict[str, Any]:
+        return self._request("GET", "/runtime/status", None)
+
     def _request(self, method: str, path: str, payload: Mapping[str, Any] | None) -> dict[str, Any]:
+        if self._token is None and self.token_file is not None:
+            self._token = _read_token(self.token_file)
         body = (
             None
             if payload is None

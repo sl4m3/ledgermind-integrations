@@ -16,7 +16,8 @@
     "lease": {"type": "string", "format": "date-time"},
     "model_request": {"$ref": "#/$defs/model_request"},
     "embedding_request": {"$ref": "#/$defs/embedding_request"},
-    "operation_input": {"type": "object"}
+    "operation_input": {"type": "object"},
+    "structured_generation": {"$ref": "#/$defs/structured_generation"}
   },
   "oneOf": [
     {
@@ -34,11 +35,17 @@
     "model_request": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["messages", "max_output_tokens", "response_format"],
+      "required": ["messages", "max_output_tokens"],
       "properties": {
         "messages": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"type": "object"}},
         "max_output_tokens": {"type": "integer", "minimum": 1, "maximum": 262144},
-        "response_format": {"enum": ["json_object", "text"]}
+        "response_format": {"oneOf": [{"enum": ["json_object", "text"]}, {"type": "object"}]},
+        "output_contract": {"type": "object"},
+        "mode": {"enum": ["auto", "json_schema", "tool_call", "json_object", "prompt_only"]},
+        "structured_output_mode": {"enum": ["auto", "json_schema", "tool_call", "json_object", "prompt_only"]},
+        "tool_name": {"type": "string", "minLength": 1, "maxLength": 200},
+        "metadata": {"type": "object"},
+        "seed": {"type": "integer", "minimum": 0}
       }
     },
     "embedding_request": {
@@ -47,8 +54,21 @@
       "required": ["texts", "purpose"],
       "properties": {
         "texts": {"type": "array", "minItems": 1, "maxItems": 512, "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
-        "purpose": {"enum": ["object_query", "object_mention", "object_card", "value_record", "retrieval_query", "facet_catalog"]},
+        "purpose": {"enum": ["object_query", "subject_query", "object_mention", "object_card", "value_record", "retrieval_query", "facet_catalog"]},
+        "subject_refs": {"type": "array", "maxItems": 512, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 500}},
         "dimensions": {"type": "integer", "minimum": 1, "maximum": 8192}
+      }
+    },
+    "structured_generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root_task_id", "attempt_number", "attempt_kind", "contract_digest"],
+      "properties": {
+        "root_task_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "parent_task_id": {"type": "string", "minLength": 1, "maxLength": 500},
+        "attempt_number": {"type": "integer", "minimum": 0, "maximum": 2},
+        "attempt_kind": {"type": "string", "enum": ["primary", "repair", "semantic_repair"]},
+        "contract_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       }
     }
   }

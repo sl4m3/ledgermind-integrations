@@ -59,6 +59,7 @@ def test_hermes_capture_matches_reference_digest() -> None:
         started_at="2026-08-02T20:00:00Z",
         completed_at="2026-08-02T20:01:05Z",
         events=_events(),
+        resolution={"project_id": "aliadoai", "repository_id": "aliadoai-next"},
     )
     fixture = json.loads(
         (Path(__file__).resolve().parents[3] / "conformance/valid/hermes_complete.json").read_text()

@@ -18,6 +18,7 @@ from ledgermind_protocol import ContextView
 
 from ...runtime.client import LedgerMindClient
 from ...runtime.delivery import DeliveryWorker
+from ...runtime.lease import RuntimeLease
 from ...runtime.spool import FileSpool
 from ...runtime.spool_migration import migrate_spool
 from ...runtime.worker_loop import HermesWorkerLoop
@@ -57,7 +58,9 @@ class ActiveRoundState:
     delivered_value_ids: list[str] = field(default_factory=list)
     captured_events: list[dict[str, Any]] = field(default_factory=list)
     tool_calls_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
+    resolution_metadata: dict[str, Any] = field(default_factory=dict)
     completed: bool = False
+
 
 @dataclass
 class SessionState:
@@ -76,6 +79,7 @@ class HermesPluginRuntime:
         config: HermesConfig,
         client: LedgerMindClient,
         spool: FileSpool,
+        hermes_metadata: Mapping[str, Any] | None = None,
     ) -> None:
         self.config = config
         self.client = client
@@ -102,10 +106,11 @@ class HermesPluginRuntime:
         self.runtime_started = False
         self.runtime_stopped = False
         self._atexit_registered = False
+        self._runtime_leases: dict[str, RuntimeLease] = {}
+        self._hermes_metadata = dict(hermes_metadata or {})
 
     @classmethod
     def from_context(cls, ctx: HermesPluginContext) -> HermesPluginRuntime:
-        del ctx
         config_path_value = os.environ.get("LEDGERMIND_HERMES_CONFIG", "").strip()
         if config_path_value:
             config_path = Path(config_path_value).expanduser()
@@ -125,7 +130,23 @@ class HermesPluginRuntime:
             max_files=config.max_spool_files,
             inflight_ttl_seconds=config.inflight_ttl_seconds,
         )
-        return cls(config=config, client=client, spool=spool)
+        metadata: dict[str, Any] = {}
+        for name in (
+            "metadata",
+            "session_metadata",
+            "project_id",
+            "repository_id",
+            "task_id",
+            "working_directory",
+            "repository_root",
+            "cwd",
+        ):
+            value = getattr(ctx, name, None)
+            if isinstance(value, Mapping):
+                metadata.update(value)
+            elif value is not None:
+                metadata[name] = value
+        return cls(config=config, client=client, spool=spool, hermes_metadata=metadata)
 
     def register_hooks(self, ctx: HermesPluginContext) -> None:
         ctx.register_hook("pre_llm_call", self.on_pre_llm_call)
@@ -139,7 +160,11 @@ class HermesPluginRuntime:
         with self._lock:
             if self.runtime_stopped:
                 return
-            if self.runtime_started and self.loop.thread is not None and self.loop.thread.is_alive():
+            if (
+                self.runtime_started
+                and self.loop.thread is not None
+                and self.loop.thread.is_alive()
+            ):
                 return
             self.loop.start()
             self.runtime_started = True
@@ -159,6 +184,34 @@ class HermesPluginRuntime:
             self.loop.stop(timeout_seconds=timeout_seconds)
             self.runtime_started = False
 
+    def _acquire_runtime_lease(self, session_id: str) -> None:
+        if not self.config.runtime_endpoint or session_id in self._runtime_leases:
+            return
+        try:
+            lease_client = LedgerMindClient(
+                endpoint=self.config.runtime_endpoint,
+                token_file=self.config.token_file,
+                timeout=self.config.request_timeout_seconds,
+                allow_remote=self.config.allow_remote,
+            )
+            lease = RuntimeLease.acquire(
+                lease_client,
+                client_id="hermes",
+                session_id=session_id,
+                heartbeat_seconds=self.config.runtime_heartbeat_seconds,
+                bootstrap_command=self.config.runtime_command,
+            )
+            self.client.endpoint = lease_client.endpoint
+            self._runtime_leases[session_id] = lease
+        except Exception as exc:
+            logger.warning("runtime lease acquire failed: %s", type(exc).__name__)
+            raise RuntimeError("LedgerMind runtime lease could not be acquired") from exc
+
+    def _release_runtime_lease(self, session_id: str) -> None:
+        lease = self._runtime_leases.pop(session_id, None)
+        if lease is not None:
+            lease.release()
+
     def shutdown(self, timeout_seconds: float = 5.0) -> None:
         """Stop workers and release resources exactly once."""
 
@@ -169,10 +222,14 @@ class HermesPluginRuntime:
             self.runtime_started = False
         self.loop.stop(timeout_seconds=timeout_seconds)
         self._context_executor.shutdown(wait=False, cancel_futures=True)
+        for session_id in tuple(self._runtime_leases):
+            self._release_runtime_lease(session_id)
 
     def on_pre_llm_call(self, **kwargs: Any) -> dict[str, str] | None:
         session_id = self._text(kwargs.get("session_id"), "session")
+        self._acquire_runtime_lease(session_id)
         state = self._begin_llm_round(session_id, kwargs.get("turn_id"), kwargs)
+        self._update_resolution_metadata(state, kwargs)
         query = kwargs.get("user_message")
         if query is not None:
             self._ensure_user_event(state, query, kwargs)
@@ -208,6 +265,7 @@ class HermesPluginRuntime:
     def on_pre_tool_call(self, **kwargs: Any) -> None:
         session_id = self._text(kwargs.get("session_id"), "session")
         state = self._get_or_create_for_hook(session_id, kwargs.get("turn_id"), kwargs)
+        self._update_resolution_metadata(state, kwargs)
         tool_call_id = self._tool_call_id(state, kwargs.get("tool_call_id"))
         with self._lock:
             if tool_call_id in state.tool_calls_by_id:
@@ -229,6 +287,7 @@ class HermesPluginRuntime:
     def on_post_tool_call(self, **kwargs: Any) -> None:
         session_id = self._text(kwargs.get("session_id"), "session")
         state = self._get_or_create_for_hook(session_id, kwargs.get("turn_id"), kwargs)
+        self._update_resolution_metadata(state, kwargs)
         tool_call_id = self._tool_call_id(state, kwargs.get("tool_call_id"))
         with self._lock:
             if tool_call_id not in state.tool_calls_by_id:
@@ -273,6 +332,7 @@ class HermesPluginRuntime:
     def on_post_llm_call(self, **kwargs: Any) -> None:
         session_id = self._text(kwargs.get("session_id"), "session")
         state = self._get_or_create_for_hook(session_id, kwargs.get("turn_id"), kwargs)
+        self._update_resolution_metadata(state, kwargs)
         self._ensure_user_event(state, kwargs.get("user_message", ""), kwargs)
         assistant_response = kwargs.get("assistant_response")
         if not isinstance(assistant_response, str) or not assistant_response.strip():
@@ -283,6 +343,7 @@ class HermesPluginRuntime:
         completed_at = self._now()
         metadata = self._pending_metadata(state, completed_at)
         extensions = metadata.get("extensions")
+        source_extensions = metadata.get("source_extensions")
         try:
             self.capture.capture_or_defer(
                 session_id=state.session_id,
@@ -292,6 +353,9 @@ class HermesPluginRuntime:
                 events=events,
                 pending_metadata=metadata,
                 extensions=extensions if isinstance(extensions, Mapping) else None,
+                source_extensions=(
+                    source_extensions if isinstance(source_extensions, Mapping) else None
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             # Keep complete structural evidence for delayed recovery. The
@@ -385,7 +449,11 @@ class HermesPluginRuntime:
             state = self.active_rounds.get(normalized_session_id)
             if state is None or state.completed:
                 return None
-            if external_turn_id and state.external_turn_id and external_turn_id != state.external_turn_id:
+            if (
+                external_turn_id
+                and state.external_turn_id
+                and external_turn_id != state.external_turn_id
+            ):
                 return None
             return state
 
@@ -420,6 +488,7 @@ class HermesPluginRuntime:
                 self._defer_active_round_locked(state)
             self.active_rounds.pop(normalized_session_id, None)
             self.session_states.pop(normalized_session_id, None)
+        self._release_runtime_lease(normalized_session_id)
 
     def _resolve_pending(self, pending: Mapping[str, Any]) -> Sequence[Mapping[str, Any]] | None:
         session_id = pending.get("session_id")
@@ -438,6 +507,38 @@ class HermesPluginRuntime:
             user_message_id=self._db_message_id(pending.get("user_message_id")),
             assistant_message_id=self._db_message_id(pending.get("assistant_message_id")),
         )
+        existing_source_extensions = pending.get("source_extensions")
+        if not (
+            isinstance(existing_source_extensions, Mapping)
+            and "ledgermind_resolution" in existing_source_extensions
+        ) and isinstance(pending, dict):
+            try:
+                pending["source_extensions"] = {
+                    "ledgermind_resolution": self.state_reader.resolution_extension(
+                        session_id,
+                        metadata=pending,
+                        first_message_id=self._db_message_id(pending.get("first_message_id")),
+                        last_message_id=self._db_message_id(pending.get("last_message_id")),
+                        started_at=pending.get("started_at")
+                        if isinstance(pending.get("started_at"), str)
+                        else None,
+                        completed_at=pending.get("completed_at")
+                        if isinstance(pending.get("completed_at"), str)
+                        else None,
+                        user_message_id=self._db_message_id(pending.get("user_message_id")),
+                        assistant_message_id=self._db_message_id(
+                            pending.get("assistant_message_id")
+                        ),
+                        project_id=self.config.project_id,
+                        repository_id=self.config.repository_id,
+                        task_id=self.config.task_id,
+                        working_directory=self.config.working_directory,
+                        repository_root=self.config.repository_root,
+                        repository_mapping=self.config.repository_mapping,
+                    )
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("pending resolution metadata unavailable: %s", type(exc).__name__)
         return events or None
 
     def _begin_llm_round(
@@ -469,6 +570,31 @@ class HermesPluginRuntime:
             state = self.get_or_create_active_round(session_id, turn_id)
         self._update_bounds(state, kwargs)
         return state
+
+    def _update_resolution_metadata(
+        self, state: ActiveRoundState, kwargs: Mapping[str, Any]
+    ) -> None:
+        candidates: list[Mapping[str, Any]] = [self._hermes_metadata, kwargs]
+        for key in ("metadata", "session_metadata", "resolution", "resolution_context"):
+            value = kwargs.get(key)
+            if isinstance(value, Mapping):
+                candidates.append(value)
+        fields = {
+            "project_id": ("project_id", "project"),
+            "repository_id": ("repository_id", "repository", "repo_id", "repo"),
+            "task_id": ("task_id", "task", "work_item_id", "work_item"),
+            "working_directory": ("working_directory", "cwd", "workdir"),
+            "repository_root": ("repository_root", "git_root"),
+        }
+        for target, names in fields.items():
+            for candidate in candidates:
+                for name in names:
+                    value = candidate.get(name)
+                    if isinstance(value, str) and value.strip():
+                        state.resolution_metadata[target] = value.strip()
+                        break
+                if target in state.resolution_metadata:
+                    break
 
     def _complete_round(self, state: ActiveRoundState) -> None:
         with self._lock:
@@ -525,15 +651,20 @@ class HermesPluginRuntime:
             "assistant_message_id": state.assistant_message_id,
             "known_event_ids": known_event_ids,
             "known_tool_events": known_tool_events,
+            "resolution_metadata": dict(state.resolution_metadata),
+        }
+        metadata["source_extensions"] = {
+            "ledgermind_resolution": self.capture.resolution_extension(
+                state.session_id,
+                metadata=state.resolution_metadata,
+            )
         }
         extensions = self._context_extensions(state)
         if extensions is not None:
             metadata["extensions"] = extensions
         return metadata
 
-    def _record_context_retrieval(
-        self, state: ActiveRoundState, response: ContextView
-    ) -> None:
+    def _record_context_retrieval(self, state: ActiveRoundState, response: ContextView) -> None:
         with self._lock:
             if state.completed:
                 return
@@ -571,7 +702,10 @@ class HermesPluginRuntime:
         self, state: ActiveRoundState, content: object, kwargs: Mapping[str, Any]
     ) -> None:
         with self._lock:
-            if any(event.get("kind") == "message" and event.get("role") == "user" for event in state.captured_events):
+            if any(
+                event.get("kind") == "message" and event.get("role") == "user"
+                for event in state.captured_events
+            ):
                 self._update_bounds(state, kwargs)
                 return
             event_id = self._message_id_from_kwargs(kwargs, "user_message_id", "message_id")
@@ -590,8 +724,12 @@ class HermesPluginRuntime:
         self, state: ActiveRoundState, content: str, kwargs: Mapping[str, Any]
     ) -> None:
         with self._lock:
-            assistant_id = self._message_id_from_kwargs(kwargs, "assistant_message_id", "message_id")
-            event_id = str(assistant_id) if assistant_id is not None else f"{state.round_id}:assistant"
+            assistant_id = self._message_id_from_kwargs(
+                kwargs, "assistant_message_id", "message_id"
+            )
+            event_id = (
+                str(assistant_id) if assistant_id is not None else f"{state.round_id}:assistant"
+            )
             for event in state.captured_events:
                 if event.get("event_id") == event_id:
                     event.update({"role": "assistant", "final": True, "content": content})
@@ -717,5 +855,6 @@ class HermesPluginRuntime:
             + "\n".join(lines)
             + "\n[/LEDGERMIND CONTEXT]"
         )
+
 
 __all__ = ["ActiveRoundState", "HermesPluginRuntime", "SessionState"]

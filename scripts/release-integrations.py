@@ -45,6 +45,7 @@ PROTOCOL_REQUIRED_WHEEL_FILES = {
     "ledgermind_protocol/core_ipc.py",
     "ledgermind_protocol/models.py",
     "ledgermind_protocol/object_facet.py",
+    "ledgermind_protocol/resolution.py",
     "ledgermind_protocol/validation.py",
     "ledgermind_protocol/py.typed",
 }
@@ -63,6 +64,7 @@ INTEGRATIONS_REQUIRED_WHEEL_FILES = {
 }
 REQUIRED_SOURCE_ASSETS = {
     Path("schemas/raw-round.schema.json"),
+    Path("schemas/core-ipc/object-facet/raw-round-resolution.schema.json"),
     Path("conformance/valid/hermes_complete.json"),
     Path("conformance/digests/raw_round.json"),
     Path("conformance/object-facet/digests.json"),

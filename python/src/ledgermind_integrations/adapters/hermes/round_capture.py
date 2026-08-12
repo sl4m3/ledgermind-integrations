@@ -6,6 +6,8 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ledgermind_protocol import (
+    LedgerMindResolution,
+    build_resolution_extension,
     validate_raw_round,
     validate_raw_round_extensions,
     with_payload_digest,
@@ -58,36 +60,70 @@ def build_raw_round(
     adapter_version: str = "hermes-python/0.1.0",
     source_schema_version: int = 1,
     extensions: Mapping[str, Any] | None = None,
+    source_extensions: Mapping[str, Any] | None = None,
+    resolution: Mapping[str, Any] | LedgerMindResolution | None = None,
+    resolution_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized = [normalize_event(event, index, round_id) for index, event in enumerate(events)]
     event_ids = [event["event_id"] for event in normalized]
+    top_level_extensions = dict(extensions) if extensions is not None else None
+    canonical_source_extensions = dict(source_extensions or {})
+    if resolution is not None and resolution_context is not None:
+        raise ValueError("resolution and resolution_context were supplied together")
+    if resolution is None:
+        resolution = resolution_context
+    if top_level_extensions is not None and "ledgermind_resolution" in top_level_extensions:
+        if "ledgermind_resolution" in canonical_source_extensions or resolution is not None:
+            raise ValueError("ledgermind_resolution was supplied more than once")
+        canonical_source_extensions["ledgermind_resolution"] = top_level_extensions.pop(
+            "ledgermind_resolution"
+        )
+    if resolution is not None:
+        if "ledgermind_resolution" in canonical_source_extensions:
+            raise ValueError("ledgermind_resolution was supplied more than once")
+        resolution_values = (
+            resolution.model_dump(mode="json")
+            if isinstance(resolution, LedgerMindResolution)
+            else dict(resolution)
+        )
+        resolution_payload = build_resolution_extension(
+            session_id,
+            metadata=resolution_values,
+        )
+        canonical_source_extensions["ledgermind_resolution"] = resolution_payload
+    if source_system == "hermes" and "ledgermind_resolution" not in canonical_source_extensions:
+        canonical_source_extensions["ledgermind_resolution"] = build_resolution_extension(session_id)
+
+    source: dict[str, Any] = {
+        "system": source_system,
+        "instance_id": source_instance_id,
+        "profile_id": profile_id,
+        "session_id": session_id,
+        "round_id": round_id,
+        "first_event_id": event_ids[0],
+        "final_event_id": event_ids[-1],
+        "event_ids": event_ids,
+        "source_schema_version": source_schema_version,
+        "adapter_version": adapter_version,
+    }
+    if canonical_source_extensions:
+        source["extensions"] = canonical_source_extensions
     payload = {
         "schema_version": 2,
         "idempotency_key": "sha256:" + "0" * 64,
         "memory_space_id": memory_space_id,
-        "source": {
-            "system": source_system,
-            "instance_id": source_instance_id,
-            "profile_id": profile_id,
-            "session_id": session_id,
-            "round_id": round_id,
-            "first_event_id": event_ids[0],
-            "final_event_id": event_ids[-1],
-            "event_ids": event_ids,
-            "source_schema_version": source_schema_version,
-            "adapter_version": adapter_version,
-        },
+        "source": source,
         "round": {
             "started_at": started_at,
             "completed_at": completed_at,
             "events": normalized,
         },
     }
-    if extensions is not None:
-        payload["extensions"] = dict(extensions)
+    if top_level_extensions:
+        payload["extensions"] = top_level_extensions
     result = with_payload_digest(payload)
     result["idempotency_key"] = result["payload_digest"]
-    if extensions is not None:
+    if top_level_extensions is not None:
         validate_raw_round_extensions(result["extensions"])
     validate_raw_round(result)
     return result

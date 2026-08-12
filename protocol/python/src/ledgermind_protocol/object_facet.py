@@ -1,4 +1,4 @@
-"""Strict object-facet resolution and retrieval contracts."""
+"""Strict object-facet and claim-first retrieval contracts."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any, Literal, TypeAlias, cast
 
 from pydantic import Field, StrictBool, StrictInt, model_validator
 
-from .models import ProtocolModel
+from .models import LedgerMindResolution, ProtocolModel
 
 MAX_MENTIONS = 24
 MAX_MENTION_CANDIDATES = 8
@@ -26,6 +26,11 @@ MAX_SCOPE_TEXT_LENGTH = 20_000
 MAX_RELATED_REFS = 32
 MAX_RESULT_OBJECTS = 128
 MAX_RESULT_VALUES = 512
+MAX_CLAIMS = 128
+MAX_CLAIM_CONDITIONS = 32
+MAX_CLAIM_CONTEXT_ANCHORS = 32
+MAX_CLAIM_REFS = 32
+MAX_COVERAGE_ENTRIES = 128
 MAX_RETRIEVAL_ITEMS = 100
 MAX_EXPLANATION_REASONS = 32
 MAX_EXPLANATION_SIGNALS = 32
@@ -39,6 +44,7 @@ MAX_EMBEDDING_VECTORS = 512
 MAX_EMBEDDING_ABSOLUTE_VALUE = 1_000_000.0
 MAX_EMBEDDING_TEXT_LENGTH = 2_000
 MAX_RETRIEVAL_OUTCOME_IDS = 100
+MAX_U64 = 18_446_744_073_709_551_615
 
 Facet: TypeAlias = Literal[
     "identity",
@@ -57,6 +63,12 @@ Facet: TypeAlias = Literal[
     "event",
 ]
 ObjectResolution: TypeAlias = Literal["existing", "new", "ambiguous"]
+CoverageDisposition: TypeAlias = Literal[
+    "claim",
+    "duplicate",
+    "ephemeral",
+    "insufficient_evidence",
+]
 ObjectReason: TypeAlias = Literal[
     "exact_alias",
     "canonical_exact",
@@ -74,6 +86,7 @@ TaskKind: TypeAlias = Literal["generate_json", "embed_texts"]
 ProfileSlot: TypeAlias = Literal["operational", "background", "embedding"]
 EmbeddingPurpose: TypeAlias = Literal[
     "object_query",
+    "subject_query",
     "object_mention",
     "object_card",
     "value_record",
@@ -81,6 +94,9 @@ EmbeddingPurpose: TypeAlias = Literal[
     "facet_catalog",
 ]
 ResponseFormat: TypeAlias = Literal["json_object", "text"]
+StructuredOutputMode: TypeAlias = Literal[
+    "auto", "json_schema", "tool_call", "json_object", "prompt_only"
+]
 ExplanationLevel: TypeAlias = Literal["compact", "none"]
 
 FACET_VALUES = frozenset(
@@ -140,6 +156,102 @@ def _validate_ids(values: list[str], name: str, maximum: int, *, minimum: int = 
     for value in values:
         _require_identifier(value, name.rstrip("s"))
     _validate_unique(values, name)
+
+
+def _validate_claim_span(
+    span_start: int,
+    span_end: int,
+    surface_text: str,
+    name: str,
+) -> None:
+    if span_end <= span_start:
+        raise ValueError(f"{name} span must have a positive length")
+    expected_length = len(surface_text.encode("utf-8"))
+    if span_end - span_start != expected_length:
+        raise ValueError(f"{name} span length must match surface_text")
+
+
+def _validate_source_span(
+    source: str,
+    span_start: int,
+    span_end: int,
+    surface_text: str,
+    name: str,
+) -> int:
+    _validate_claim_span(span_start, span_end, surface_text, name)
+    encoded = source.encode("utf-8")
+    if span_end > len(encoded):
+        raise ValueError(f"{name} span exceeds the source event")
+    try:
+        # Decoding both prefixes rejects offsets inside a UTF-8 code point.
+        encoded[:span_start].decode("utf-8")
+        encoded[:span_end].decode("utf-8")
+        selected = encoded[span_start:span_end].decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{name} span must use UTF-8 character boundaries") from error
+    if selected != surface_text:
+        raise ValueError(f"{name} surface_text and span must exactly match the source event")
+    return span_start
+
+
+def _looks_like_uuid(value: str) -> bool:
+    parts = value.split("-")
+    return len(parts) == 5 and all(
+        len(part) == expected and all(character in "0123456789abcdef" for character in part)
+        for part, expected in zip(parts, (8, 4, 4, 4, 12))
+    )
+
+
+def _opaque_identifier(value: str) -> bool:
+    trimmed = value.strip().strip("\"'`,;.)]}")
+    lower = trimmed.lower()
+    prefixes = (
+        "call-",
+        "call_",
+        "request-",
+        "request_",
+        "trace-",
+        "trace_",
+        "run-",
+        "run_",
+        "raw_round_id",
+        "raw-round-id",
+        "retrieval_request_id",
+        "retrieval-request-id",
+        "idempotency_key",
+        "idempotency-key",
+    )
+    return (
+        any(lower.startswith(prefix) and len(lower) > len(prefix) for prefix in prefixes)
+        or lower.startswith("sha256:")
+        or _looks_like_uuid(lower)
+    )
+
+
+def _validate_source_events(source_events: Mapping[str, str]) -> dict[str, str]:
+    if not isinstance(source_events, Mapping):
+        raise TypeError("source events must be a mapping")
+    validated: dict[str, str] = {}
+    for event_id, text in source_events.items():
+        if not isinstance(event_id, str) or not event_id.strip():
+            raise ValueError("source events must map non-empty IDs to text")
+        if not isinstance(text, str):
+            raise TypeError("source events must map IDs to text")
+        validated[event_id] = text
+    return validated
+
+
+def _condition_occurrences(source: str, surface_text: str) -> list[tuple[int, int]]:
+    occurrences: list[tuple[int, int]] = []
+    character_offset = 0
+    while True:
+        found = source.find(surface_text, character_offset)
+        if found < 0:
+            return occurrences
+        byte_start = len(source[:found].encode("utf-8"))
+        byte_end = byte_start + len(surface_text.encode("utf-8"))
+        occurrences.append((byte_start, byte_end))
+        character_offset = found + len(surface_text)
 
 
 def _require_sha256_digest(value: str, name: str) -> None:
@@ -218,7 +330,13 @@ class ModelRequest(ProtocolModel):
 
     messages: list[dict[str, Any]] = Field(min_length=1, max_length=MAX_TASK_MESSAGES)
     max_output_tokens: int = Field(ge=1, le=MAX_OUTPUT_TOKENS)
-    response_format: ResponseFormat
+    response_format: ResponseFormat | dict[str, Any] | None = None
+    output_contract: dict[str, Any] | None = None
+    mode: StructuredOutputMode | None = None
+    structured_output_mode: StructuredOutputMode | None = None
+    tool_name: str | None = Field(default=None, min_length=1, max_length=200)
+    metadata: dict[str, Any] | None = None
+    seed: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_messages(self) -> ModelRequest:
@@ -233,6 +351,7 @@ class EmbeddingRequest(ProtocolModel):
 
     texts: list[str] = Field(min_length=1, max_length=MAX_EMBEDDING_TEXTS)
     purpose: EmbeddingPurpose
+    subject_refs: list[str] | None = Field(default=None, max_length=MAX_EMBEDDING_TEXTS)
     dimensions: int | None = Field(default=None, ge=1, le=MAX_EMBEDDING_DIMENSIONS)
 
     @model_validator(mode="after")
@@ -243,6 +362,8 @@ class EmbeddingRequest(ProtocolModel):
                     "embedding text must be a non-empty string of at most "
                     f"{MAX_EMBEDDING_TEXT_LENGTH} characters"
                 )
+        if self.subject_refs is not None:
+            _validate_ids(self.subject_refs, "subject_refs", MAX_EMBEDDING_TEXTS, minimum=0)
         return self
 
 
@@ -260,6 +381,7 @@ class GenericExecutionTask(ProtocolModel):
     model_request: ModelRequest | None = None
     embedding_request: EmbeddingRequest | None = None
     operation_input: dict[str, Any] | None = None
+    structured_generation: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_task(self) -> GenericExecutionTask:
@@ -329,6 +451,7 @@ class IngestRawRoundRequest(ProtocolModel):
     memory_space_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     raw_round: dict[str, Any]
     resolution_context: ResolutionContext | None = None
+    embedding_profile: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_request(self) -> IngestRawRoundRequest:
@@ -378,8 +501,8 @@ class MentionResolutionInput(ProtocolModel):
     surface_text: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
     normalized_text: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
     source_event_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
-    span_start: StrictInt = Field(ge=0)
-    span_end: StrictInt = Field(ge=0)
+    span_start: StrictInt = Field(ge=0, le=MAX_U64)
+    span_end: StrictInt = Field(ge=0, le=MAX_U64)
     candidate_set_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     candidates: list[ObjectCandidate] = Field(max_length=MAX_MENTION_CANDIDATES)
 
@@ -423,6 +546,215 @@ class OperationalExtractionInput(ProtocolModel):
         mention_refs = [mention.mention_ref for mention in self.mentions]
         _validate_unique(mention_refs, "mention refs")
         return self
+
+
+class ClaimSubject(ProtocolModel):
+    """Exact source grounding for a claim subject.
+
+    Span offsets are UTF-8 byte offsets, matching Core's source-event contract.
+    """
+
+    source_event_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    surface_text: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+    span_start: StrictInt = Field(ge=0, le=MAX_U64)
+    span_end: StrictInt = Field(ge=0, le=MAX_U64)
+
+    @model_validator(mode="after")
+    def validate_subject(self) -> ClaimSubject:
+        self._validate_subject_fields()
+        return self
+
+    def _validate_subject_fields(self) -> None:
+        _require_identifier(self.source_event_id, "subject source event id")
+        _require_text(self.surface_text, "subject surface text", MAX_CONTENT_LENGTH)
+        _validate_claim_span(self.span_start, self.span_end, self.surface_text, "subject")
+
+
+class ClaimCondition(ProtocolModel):
+    """Exact source evidence for a claim condition."""
+
+    source_event_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    surface_text: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+
+    @model_validator(mode="after")
+    def validate_condition(self) -> ClaimCondition:
+        self._validate_condition_fields()
+        return self
+
+    def _validate_condition_fields(self) -> None:
+        _require_identifier(self.source_event_id, "condition source event id")
+        _require_text(self.surface_text, "condition surface text", MAX_CONTENT_LENGTH)
+
+
+class ExtractedClaim(ProtocolModel):
+    """Provider-extracted claim before Core derives a resolved subject."""
+
+    claim_ref: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    subject: ClaimSubject
+    facet: Facet
+    content: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+    conditions: list[ClaimCondition] = Field(
+        default_factory=list,
+        max_length=MAX_CLAIM_CONDITIONS,
+    )
+    context_anchor_refs: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_CLAIM_CONTEXT_ANCHORS,
+    )
+    source_event_ids: list[str] = Field(
+        min_length=1,
+        max_length=MAX_SOURCE_EVENT_IDS,
+    )
+
+    @model_validator(mode="after")
+    def validate_claim(self) -> ExtractedClaim:
+        self._validate_claim_fields()
+        return self
+
+    def _validate_claim_fields(self) -> None:
+        _require_identifier(self.claim_ref, "claim ref")
+        self.subject._validate_subject_fields()
+        if _opaque_identifier(self.subject.surface_text):
+            raise ValueError("subject must not be an opaque identifier")
+        _require_text(self.content, "content", MAX_CONTENT_LENGTH)
+        for condition in self.conditions:
+            condition._validate_condition_fields()
+        condition_keys = [
+            (condition.source_event_id, condition.surface_text)
+            for condition in self.conditions
+        ]
+        _validate_unique(condition_keys, "conditions")
+        for anchor_ref in self.context_anchor_refs:
+            _require_identifier(anchor_ref, "context anchor ref")
+        _validate_unique(self.context_anchor_refs, "context_anchor_refs")
+        _validate_ids(self.source_event_ids, "source_event_ids", MAX_SOURCE_EVENT_IDS)
+        if self.subject.source_event_id not in self.source_event_ids:
+            raise ValueError("source_event_ids must include the subject source event")
+        for condition in self.conditions:
+            if condition.source_event_id not in self.source_event_ids:
+                raise ValueError(
+                    "source_event_ids must include every condition source event"
+                )
+
+    def validate_with_source(self, source_events: Mapping[str, str]) -> None:
+        self._validate_claim_fields()
+        events = _validate_source_events(source_events)
+        subject_source = events.get(self.subject.source_event_id)
+        if subject_source is None:
+            raise ValueError(
+                f"unknown subject source event {self.subject.source_event_id}"
+            )
+        subject_start = _validate_source_span(
+            subject_source,
+            self.subject.span_start,
+            self.subject.span_end,
+            self.subject.surface_text,
+            "subject",
+        )
+        for event_id in self.source_event_ids:
+            if event_id not in events:
+                raise ValueError(f"unknown source event {event_id}")
+        for condition in self.conditions:
+            condition_source = events.get(condition.source_event_id)
+            if condition_source is None:
+                raise ValueError(
+                    f"unknown condition source event {condition.source_event_id}"
+                )
+            occurrences = _condition_occurrences(condition_source, condition.surface_text)
+            if not occurrences:
+                raise ValueError(
+                    "condition surface_text is not an exact source substring: "
+                    f"{condition.source_event_id}"
+                )
+            if condition.source_event_id == self.subject.source_event_id and any(
+                start <= subject_start and self.subject.span_end <= end
+                for start, end in occurrences
+            ):
+                raise ValueError("subject span must not be contained in a condition span")
+
+
+class ClaimCoverage(ProtocolModel):
+    """Explicit disposition for one requirement/evidence anchor."""
+
+    anchor_ref: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    disposition: CoverageDisposition
+    claim_refs: list[str] = Field(default_factory=list, max_length=MAX_CLAIM_REFS)
+
+    @model_validator(mode="after")
+    def validate_coverage(self) -> ClaimCoverage:
+        self._validate_coverage_fields()
+        return self
+
+    def _validate_coverage_fields(self) -> None:
+        _require_identifier(self.anchor_ref, "anchor ref")
+        for claim_ref in self.claim_refs:
+            _require_identifier(claim_ref, "coverage claim ref")
+        _validate_unique(self.claim_refs, "coverage claim_refs")
+        if self.disposition in {"claim", "duplicate"} and not self.claim_refs:
+            raise ValueError("claim and duplicate coverage require at least one claim_ref")
+        if self.disposition in {"ephemeral", "insufficient_evidence"} and self.claim_refs:
+            raise ValueError(
+                "ephemeral and insufficient_evidence coverage forbid claim_refs"
+            )
+
+
+class ClaimExtractionOutput(ProtocolModel):
+    """Claim-first operational extraction output owned by Core."""
+
+    schema_version: Literal[1] = 1
+    claims: list[ExtractedClaim] = Field(default_factory=list, max_length=MAX_CLAIMS)
+    coverage: list[ClaimCoverage] = Field(
+        default_factory=list,
+        max_length=MAX_COVERAGE_ENTRIES,
+    )
+
+    @model_validator(mode="after")
+    def validate_output(self) -> ClaimExtractionOutput:
+        self._validate_output_fields()
+        return self
+
+    def _validate_output_fields(self) -> None:
+        for claim in self.claims:
+            claim._validate_claim_fields()
+        for coverage in self.coverage:
+            coverage._validate_coverage_fields()
+        claim_refs = [claim.claim_ref for claim in self.claims]
+        _validate_unique(claim_refs, "claim refs")
+        coverage_anchor_refs = [coverage.anchor_ref for coverage in self.coverage]
+        _validate_unique(coverage_anchor_refs, "coverage anchor refs")
+        known_claim_refs = set(claim_refs)
+        for coverage in self.coverage:
+            for claim_ref in coverage.claim_refs:
+                if claim_ref not in known_claim_refs:
+                    raise ValueError(f"coverage references unknown claim_ref {claim_ref}")
+
+    def validate_with_source(self, source_events: Mapping[str, str]) -> None:
+        self._validate_output_fields()
+        for claim in self.claims:
+            claim.validate_with_source(source_events)
+
+    def validate_coverage_against(self, requirement_anchor_refs: list[str]) -> None:
+        self._validate_output_fields()
+        if len(requirement_anchor_refs) > MAX_COVERAGE_ENTRIES:
+            raise ValueError(
+                f"requirement anchor refs must not exceed {MAX_COVERAGE_ENTRIES} entries"
+            )
+        _validate_unique(requirement_anchor_refs, "requirement anchor refs")
+        for anchor_ref in requirement_anchor_refs:
+            _require_identifier(anchor_ref, "requirement anchor ref")
+        offered = set(requirement_anchor_refs)
+        returned = {coverage.anchor_ref for coverage in self.coverage}
+        if offered != returned:
+            raise ValueError("coverage must contain exactly the offered requirement anchors")
+
+
+# Names used by the claim-first Core contract and application contour.
+SubjectGrounding = ClaimSubject
+ConditionGrounding = ClaimCondition
+OperationalModelClaim = ExtractedClaim
+OperationalModelCoverage = ClaimCoverage
+OperationalClaimOutput = ClaimExtractionOutput
+OperationalModelClaimOutput = ClaimExtractionOutput
 
 
 class ResolvedObject(ProtocolModel):
@@ -634,19 +966,47 @@ class RawRoundContextExtension(ProtocolModel):
     ledgermind_context: LedgerMindContext
 
 
+class RawRoundResolutionExtension(ProtocolModel):
+    """The owned ``source.extensions`` wrapper for resolution identity."""
+
+    ledgermind_resolution: LedgerMindResolution
+
+
+LedgerMindResolutionExtension = RawRoundResolutionExtension
+
+
+def validate_raw_round_source_extensions(
+    extensions: Mapping[str, Any] | RawRoundResolutionExtension,
+) -> RawRoundResolutionExtension | None:
+    """Validate the owned source extension without discarding other keys."""
+
+    if isinstance(extensions, RawRoundResolutionExtension):
+        return extensions
+    if not isinstance(extensions, Mapping):
+        raise TypeError("RawRound source extensions must be an object")
+    if "ledgermind_resolution" not in extensions:
+        return None
+    return RawRoundResolutionExtension.model_validate(
+        {"ledgermind_resolution": extensions["ledgermind_resolution"]}
+    )
+
+
 def validate_raw_round_extensions(
-    extensions: Mapping[str, Any] | RawRoundContextExtension,
-) -> RawRoundContextExtension | None:
-    """Validate ``ledgermind_context`` without changing unrelated extensions."""
+    extensions: Mapping[str, Any] | RawRoundContextExtension | RawRoundResolutionExtension,
+) -> RawRoundContextExtension | RawRoundResolutionExtension | None:
+    """Validate owned extensions without changing unrelated extensions."""
 
     if isinstance(extensions, RawRoundContextExtension):
         return extensions
+    if isinstance(extensions, RawRoundResolutionExtension):
+        return extensions
     if not isinstance(extensions, Mapping):
         raise TypeError("RawRound extensions must be an object")
-    if "ledgermind_context" not in extensions:
-        return None
-    context = extensions["ledgermind_context"]
-    return RawRoundContextExtension.model_validate({"ledgermind_context": context})
+    resolution = validate_raw_round_source_extensions(extensions)
+    if "ledgermind_context" in extensions:
+        context = extensions["ledgermind_context"]
+        return RawRoundContextExtension.model_validate({"ledgermind_context": context})
+    return resolution
 
 
 class FacetActivation(ProtocolModel):
@@ -662,14 +1022,23 @@ class FacetActivation(ProtocolModel):
 
 
 class ScoreComponents(ProtocolModel):
-    semantic: float = Field(ge=0.0, le=1.0)
-    object: float = Field(ge=0.0, le=1.0)
-    facet: float = Field(ge=0.0, le=1.0)
-    scope_time: float = Field(ge=0.0, le=1.0)
-    context: float = Field(ge=0.0, le=1.0)
-    recency: float = Field(ge=0.0, le=1.0)
-    support: float = Field(ge=0.0, le=1.0)
-    usage: float = Field(ge=0.0, le=1.0)
+    semantic_similarity: float = Field(ge=0.0, le=1.0)
+    semantic_contribution: float = Field(ge=0.0, le=1.0)
+    object_similarity: float = Field(ge=0.0, le=1.0)
+    object_contribution: float = Field(ge=0.0, le=1.0)
+    facet_compatibility: float = Field(ge=0.0, le=1.0)
+    facet_contribution: float = Field(ge=0.0, le=1.0)
+    scope_time_compatibility: float = Field(ge=0.0, le=1.0)
+    scope_time_contribution: float = Field(ge=0.0, le=1.0)
+    context_compatibility: float = Field(ge=0.0, le=1.0)
+    context_contribution: float = Field(ge=0.0, le=1.0)
+    recency_component: float = Field(ge=0.0, le=1.0)
+    recency_contribution: float = Field(ge=0.0, le=1.0)
+    support_component: float = Field(ge=0.0, le=1.0)
+    support_contribution: float = Field(ge=0.0, le=1.0)
+    usage_component: float = Field(ge=0.0, le=1.0)
+    usage_contribution: float = Field(ge=0.0, le=1.0)
+    final_score: float = Field(ge=0.0, le=1.0)
 
 
 class RetrievalExplanation(ProtocolModel):
@@ -692,6 +1061,7 @@ class RetrievalItem(ProtocolModel):
     object_name: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     facet: Facet
     content: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+    source_event_ids: list[str] = Field(min_length=1, max_length=MAX_SOURCE_EVENT_IDS)
     relevance: float = Field(ge=0.0, le=1.0)
     explanation: RetrievalExplanation
 
@@ -700,6 +1070,7 @@ class RetrievalItem(ProtocolModel):
         _require_identifier(self.value_id, "value id")
         _require_identifier(self.primary_object_id, "primary object id")
         _require_text(self.object_name, "object name", MAX_IDENTIFIER_LENGTH)
+        _validate_ids(self.source_event_ids, "source_event_ids", MAX_SOURCE_EVENT_IDS)
         if self.explanation.item_facet != self.facet:
             raise ValueError("explanation item_facet must match the item facet")
         return self
@@ -841,7 +1212,12 @@ calculate_object_facet_digest = canonical_digest
 
 __all__ = [
     "FACET_VALUES",
+    "MAX_CLAIMS",
+    "MAX_CLAIM_CONDITIONS",
+    "MAX_CLAIM_CONTEXT_ANCHORS",
+    "MAX_CLAIM_REFS",
     "MAX_CONTEXT_IDS",
+    "MAX_COVERAGE_ENTRIES",
     "MAX_EMBEDDING_DIMENSIONS",
     "MAX_EMBEDDING_TEXTS",
     "MAX_EMBEDDING_VECTORS",
@@ -850,10 +1226,17 @@ __all__ = [
     "MAX_OUTPUT_TOKENS",
     "MAX_TASK_MESSAGES",
     "OBJECT_REASON_VALUES",
+    "ClaimCondition",
+    "ClaimCoverage",
+    "ClaimExtractionOutput",
+    "ClaimSubject",
+    "ConditionGrounding",
+    "CoverageDisposition",
     "EmbedResult",
     "EmbeddingPurpose",
     "EmbeddingRequest",
     "ExplanationLevel",
+    "ExtractedClaim",
     "ExtractedValue",
     "Facet",
     "FacetActivation",
@@ -862,15 +1245,22 @@ __all__ = [
     "IngestRawRoundResponse",
     "IngestStatus",
     "LedgerMindContext",
+    "LedgerMindResolution",
+    "LedgerMindResolutionExtension",
     "MentionResolutionInput",
     "ModelRequest",
     "ObjectCandidate",
     "ObjectReason",
     "ObjectResolution",
+    "OperationalClaimOutput",
     "OperationalExtractionInput",
     "OperationalExtractionResult",
+    "OperationalModelClaim",
+    "OperationalModelClaimOutput",
+    "OperationalModelCoverage",
     "ProfileSlot",
     "RawRoundContextExtension",
+    "RawRoundResolutionExtension",
     "RecordRetrievalOutcome",
     "ResolutionContext",
     "ResolvedObject",
@@ -880,9 +1270,12 @@ __all__ = [
     "RetrievalRequest",
     "RetrievalResponse",
     "ScoreComponents",
+    "StructuredOutputMode",
+    "SubjectGrounding",
     "TaskKind",
     "calculate_object_facet_digest",
     "canonical_digest",
     "canonical_json_bytes",
     "validate_raw_round_extensions",
+    "validate_raw_round_source_extensions",
 ]

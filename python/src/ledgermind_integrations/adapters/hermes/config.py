@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -28,6 +29,15 @@ class HermesConfig:
     max_spool_bytes: int = 50_000_000
     max_spool_files: int = 1_000
     inflight_ttl_seconds: float = 300.0
+    runtime_endpoint: str | None = None
+    runtime_command: str | None = None
+    runtime_heartbeat_seconds: float = 10.0
+    project_id: str | None = None
+    repository_id: str | None = None
+    task_id: str | None = None
+    working_directory: str | None = None
+    repository_root: str | None = None
+    repository_mapping: dict[str, object] = field(default_factory=dict)
 
 
 _REQUIRED = ("endpoint", "memory_space_id", "source_instance_id", "profile_id")
@@ -40,6 +50,25 @@ def load_config(path: str | Path) -> HermesConfig:
     for key in _REQUIRED:
         if not str(payload.get(key, "")).strip():
             raise ValueError(f"Hermes config requires {key}")
+    heartbeat_value = payload.get("heartbeat_seconds")
+    if heartbeat_value is None:
+        heartbeat_value = payload.get("runtime_heartbeat_seconds")
+    if heartbeat_value is None:
+        heartbeat_value = 10.0
+    resolution = payload.get("resolution")
+    resolution_mapping = resolution if isinstance(resolution, Mapping) else {}
+
+    def optional_text(name: str) -> str | None:
+        value = payload.get(name)
+        if not isinstance(value, str) or not value.strip():
+            value = resolution_mapping.get(name)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    raw_repository_mapping = payload.get("repository_mapping")
+    if not isinstance(raw_repository_mapping, Mapping):
+        raw_repository_mapping = resolution_mapping.get("repository_mapping", {})
+    if not isinstance(raw_repository_mapping, Mapping):
+        raise TypeError("Hermes repository_mapping must be an object")
     return HermesConfig(
         endpoint=str(payload["endpoint"]),
         token_file=str(payload.get("token_file", "~/.ledgermind/server.token")),
@@ -60,4 +89,22 @@ def load_config(path: str | Path) -> HermesConfig:
         max_spool_bytes=max(int(payload.get("max_spool_bytes", 50_000_000)), 1),
         max_spool_files=max(int(payload.get("max_spool_files", 1_000)), 1),
         inflight_ttl_seconds=max(float(payload.get("inflight_ttl_seconds", 300.0)), 0.1),
+        runtime_endpoint=(
+            str(payload["runtime_endpoint"]).rstrip("/")
+            if payload.get("runtime_endpoint")
+            else None
+        ),
+        runtime_command=(
+            str(payload["runtime_command"]) if payload.get("runtime_command") else None
+        ),
+        runtime_heartbeat_seconds=max(
+            float(str(heartbeat_value)),
+            0.1,
+        ),
+        project_id=optional_text("project_id"),
+        repository_id=optional_text("repository_id"),
+        task_id=optional_text("task_id"),
+        working_directory=optional_text("working_directory"),
+        repository_root=optional_text("repository_root"),
+        repository_mapping=dict(raw_repository_mapping),
     )

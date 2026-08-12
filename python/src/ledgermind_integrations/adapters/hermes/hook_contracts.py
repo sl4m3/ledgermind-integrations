@@ -27,6 +27,14 @@ class PreLLMCallKwargs(TypedDict, total=False):
     platform: str
     parent_session_id: str
     sender_id: str
+    project_id: str
+    repository_id: str
+    conversation_id: str
+    working_directory: str
+    repository_root: str
+    cwd: str
+    metadata: Mapping[str, Any]
+    session_metadata: Mapping[str, Any]
     started_at: str
     first_message_id: int | str
     last_message_id: int | str
@@ -49,6 +57,14 @@ class PostLLMCallKwargs(TypedDict, total=False):
     message_id: int | str
     user_message_id: int | str
     assistant_message_id: int | str
+    project_id: str
+    repository_id: str
+    conversation_id: str
+    working_directory: str
+    repository_root: str
+    cwd: str
+    metadata: Mapping[str, Any]
+    session_metadata: Mapping[str, Any]
 
 
 class PreToolCallKwargs(TypedDict, total=False):
@@ -62,6 +78,14 @@ class PreToolCallKwargs(TypedDict, total=False):
     first_message_id: int | str
     last_message_id: int | str
     message_id: int | str
+    project_id: str
+    repository_id: str
+    conversation_id: str
+    working_directory: str
+    repository_root: str
+    cwd: str
+    metadata: Mapping[str, Any]
+    session_metadata: Mapping[str, Any]
 
 
 class PostToolCallKwargs(PreToolCallKwargs, total=False):

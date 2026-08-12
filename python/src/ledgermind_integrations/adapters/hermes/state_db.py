@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ledgermind_protocol import build_resolution_extension
+
 
 class HermesStateReader:
     def __init__(self, path: str | Path) -> None:
@@ -59,6 +61,50 @@ class HermesStateReader:
             assistant_message_id=assistant_message_id,
         )
 
+    def resolution_extension(
+        self,
+        session_id: str,
+        *,
+        metadata: Mapping[str, Any] | None = None,
+        first_message_id: int | None = None,
+        last_message_id: int | None = None,
+        started_at: str | None = None,
+        completed_at: str | None = None,
+        user_message_id: int | None = None,
+        assistant_message_id: int | None = None,
+        project_id: str | None = None,
+        repository_id: str | None = None,
+        task_id: str | None = None,
+        working_directory: str | None = None,
+        repository_root: str | None = None,
+        repository_mapping: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Build the canonical resolution extension from Hermes metadata."""
+
+        rows, columns = self._query_rows(
+            session_id,
+            first_message_id=first_message_id,
+            last_message_id=last_message_id,
+            started_at=started_at,
+            completed_at=completed_at,
+            user_message_id=user_message_id,
+            assistant_message_id=assistant_message_id,
+        )
+        row_metadata = [self._resolution_metadata(row, columns) for row in rows]
+        if metadata is not None:
+            row_metadata.append(dict(metadata))
+        return build_resolution_extension(
+            session_id,
+            metadata=row_metadata,
+            project_id=project_id,
+            repository_id=repository_id,
+            task_id=task_id,
+            working_directory=working_directory,
+            repository_root=repository_root,
+            repository_mapping=repository_mapping,
+            base_path=self.path.parent,
+        )
+
     def _connect(self) -> sqlite3.Connection | None:
         if not self.path.exists():
             return None
@@ -98,6 +144,23 @@ class HermesStateReader:
                     "created_at",
                     "finish_reason",
                     "effect_disposition",
+                    "project_id",
+                    "repository_id",
+                    "task_id",
+                    "conversation_id",
+                    "project",
+                    "repository",
+                    "task",
+                    "repo_id",
+                    "repo",
+                    "working_directory",
+                    "repository_root",
+                    "git_root",
+                    "cwd",
+                    "workdir",
+                    "metadata",
+                    "session_metadata",
+                    "resolution_context",
                 )
                 if name in columns
             ]
@@ -334,6 +397,35 @@ class HermesStateReader:
         if "api_content" in columns and row["api_content"]:
             return row["api_content"]
         return row["content"] if "content" in columns else ""
+
+    @staticmethod
+    def _resolution_metadata(row: sqlite3.Row, columns: set[str]) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        for name in (
+            "project_id",
+            "repository_id",
+            "task_id",
+            "conversation_id",
+            "project",
+            "repository",
+            "task",
+            "repo_id",
+            "repo",
+            "working_directory",
+            "repository_root",
+            "git_root",
+            "cwd",
+            "workdir",
+        ):
+            if name in columns and row[name] is not None:
+                metadata[name] = row[name]
+        for name in ("metadata", "session_metadata", "resolution_context"):
+            if name not in columns:
+                continue
+            decoded = HermesStateReader._decode_json(row[name])
+            if isinstance(decoded, Mapping):
+                metadata[name] = decoded
+        return metadata
 
     @staticmethod
     def _as_call_list(value: object) -> list[object]:

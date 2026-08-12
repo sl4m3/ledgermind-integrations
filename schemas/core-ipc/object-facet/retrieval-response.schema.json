@@ -42,6 +42,7 @@
         "object_name",
         "facet",
         "content",
+        "source_event_ids",
         "relevance",
         "explanation"
       ],
@@ -51,6 +52,13 @@
         "object_name": {"type": "string", "minLength": 1, "maxLength": 500},
         "facet": {"$ref": "#/$defs/facet"},
         "content": {"type": "string", "minLength": 1, "maxLength": 20000},
+        "source_event_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 500}
+        },
         "relevance": {"type": "number", "minimum": 0, "maximum": 1},
         "explanation": {"$ref": "#/$defs/explanation"}
       }
@@ -106,24 +114,42 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "semantic",
-        "object",
-        "facet",
-        "scope_time",
-        "context",
-        "recency",
-        "support",
-        "usage"
+        "semantic_similarity",
+        "semantic_contribution",
+        "object_similarity",
+        "object_contribution",
+        "facet_compatibility",
+        "facet_contribution",
+        "scope_time_compatibility",
+        "scope_time_contribution",
+        "context_compatibility",
+        "context_contribution",
+        "recency_component",
+        "recency_contribution",
+        "support_component",
+        "support_contribution",
+        "usage_component",
+        "usage_contribution",
+        "final_score"
       ],
       "properties": {
-        "semantic": {"type": "number", "minimum": 0, "maximum": 1},
-        "object": {"type": "number", "minimum": 0, "maximum": 1},
-        "facet": {"type": "number", "minimum": 0, "maximum": 1},
-        "scope_time": {"type": "number", "minimum": 0, "maximum": 1},
-        "context": {"type": "number", "minimum": 0, "maximum": 1},
-        "recency": {"type": "number", "minimum": 0, "maximum": 1},
-        "support": {"type": "number", "minimum": 0, "maximum": 1},
-        "usage": {"type": "number", "minimum": 0, "maximum": 1}
+        "semantic_similarity": {"type": "number", "minimum": 0, "maximum": 1},
+        "semantic_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "object_similarity": {"type": "number", "minimum": 0, "maximum": 1},
+        "object_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "facet_compatibility": {"type": "number", "minimum": 0, "maximum": 1},
+        "facet_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "scope_time_compatibility": {"type": "number", "minimum": 0, "maximum": 1},
+        "scope_time_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "context_compatibility": {"type": "number", "minimum": 0, "maximum": 1},
+        "context_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "recency_component": {"type": "number", "minimum": 0, "maximum": 1},
+        "recency_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "support_component": {"type": "number", "minimum": 0, "maximum": 1},
+        "support_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "usage_component": {"type": "number", "minimum": 0, "maximum": 1},
+        "usage_contribution": {"type": "number", "minimum": 0, "maximum": 1},
+        "final_score": {"type": "number", "minimum": 0, "maximum": 1}
       }
     }
   }

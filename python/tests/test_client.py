@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+import json
+import subprocess
+from typing import Any, cast
 
 import pytest
 
 import ledgermind_integrations
+from ledgermind_integrations.runtime import lease as lease_module
 from ledgermind_integrations.runtime.client import (
     LedgerMindClient,
     LedgerMindResponseError,
@@ -27,20 +30,30 @@ def _response() -> dict[str, Any]:
                 "object_name": "Repository",
                 "facet": "property",
                 "content": "Use the public protocol.",
+                "source_event_ids": ["event-1"],
                 "relevance": 0.9,
                 "explanation": {
                     "object_reasons": ["direct_value_semantic"],
                     "item_facet": "property",
                     "activated_facets": [],
                     "score_components": {
-                        "semantic": 0.9,
-                        "object": 0.0,
-                        "facet": 0.0,
-                        "scope_time": 0.0,
-                        "context": 0.0,
-                        "recency": 0.0,
-                        "support": 0.0,
-                        "usage": 0.0,
+                        "semantic_similarity": 0.9,
+                        "semantic_contribution": 0.9,
+                        "object_similarity": 0.0,
+                        "object_contribution": 0.0,
+                        "facet_compatibility": 0.0,
+                        "facet_contribution": 0.0,
+                        "scope_time_compatibility": 0.0,
+                        "scope_time_contribution": 0.0,
+                        "context_compatibility": 0.0,
+                        "context_contribution": 0.0,
+                        "recency_component": 0.0,
+                        "recency_contribution": 0.0,
+                        "support_component": 0.0,
+                        "support_contribution": 0.0,
+                        "usage_component": 0.0,
+                        "usage_contribution": 0.0,
+                        "final_score": 0.9,
                     },
                 },
             }
@@ -104,3 +117,49 @@ def test_client_rejects_legacy_context_item_fields(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(LedgerMindResponseError, match="ContextView"):
         client.retrieve_context(memory_space_id="space-1", query="protocol")
+
+
+def test_runtime_bootstrap_updates_endpoint_and_waits_for_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClient:
+        endpoint = "http://127.0.0.1:8765"
+        timeout = 0.1
+
+        def health_live(self) -> dict[str, Any]:
+            return {"status": "ok"}
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        assert command[-7:] == [
+            "runtime",
+            "acquire",
+            "--client",
+            "hermes",
+            "--session-id",
+            "session-1",
+            "--json",
+        ]
+        assert kwargs["check"] is False
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "runtime": {
+                        "lease_id": "lease-1",
+                        "endpoint": "http://127.0.0.1:8766",
+                    }
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(lease_module.subprocess, "run", run)
+    result = lease_module._bootstrap_runtime(
+        cast(Any, FakeClient()),
+        client_id="hermes",
+        session_id="session-1",
+        command="ledgermind",
+    )
+
+    assert result["lease_id"] == "lease-1"
