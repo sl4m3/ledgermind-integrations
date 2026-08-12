@@ -1023,10 +1023,15 @@ class FacetActivation(ProtocolModel):
 
 class ScoreComponents(ProtocolModel):
     semantic_similarity: float = Field(ge=0.0, le=1.0)
+    semantic_similarity_raw: float = Field(default=0.0, ge=0.0, le=1.0)
     semantic_contribution: float = Field(ge=0.0, le=1.0)
     object_similarity: float = Field(ge=0.0, le=1.0)
+    object_similarity_raw: float = Field(default=0.0, ge=0.0, le=1.0)
+    object_card_cosine: float = Field(default=0.0, ge=0.0, le=1.0)
+    lexical_object_match: float = Field(default=0.0, ge=0.0, le=1.0)
     object_contribution: float = Field(ge=0.0, le=1.0)
     facet_compatibility: float = Field(ge=0.0, le=1.0)
+    facet_compatibility_raw: float = Field(default=0.0, ge=0.0, le=1.0)
     facet_contribution: float = Field(ge=0.0, le=1.0)
     scope_time_compatibility: float = Field(ge=0.0, le=1.0)
     scope_time_contribution: float = Field(ge=0.0, le=1.0)

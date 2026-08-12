@@ -22,6 +22,7 @@
           "object_similarity": 0.0,
           "object_contribution": 0.0,
           "facet_compatibility": 0.44,
+          "facet_compatibility_raw": 0.44,
           "facet_contribution": 0.044,
           "scope_time_compatibility": 1.0,
           "scope_time_contribution": 0.1,
