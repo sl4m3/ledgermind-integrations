@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import os
 import threading
@@ -32,6 +33,48 @@ logger = logging.getLogger(__name__)
 MessageId = int | str | None
 _CONTEXT_EXTENSION_KEY = "ledgermind_context"
 _MAX_CONTEXT_IDS = 100
+_MAX_CONTEXT_RETRIEVAL_ATTEMPTS = 2
+
+
+def _append_hook_trace(event: Mapping[str, Any]) -> None:
+    """Append a redacted host-hook event when certification asks for it."""
+
+    target_value = os.environ.get("LEDGERMIND_HERMES_TRACE_PATH", "").strip()
+    if not target_value:
+        return
+    target = Path(target_value).expanduser()
+    payload = {
+        "schema_version": 1,
+        "event": str(event.get("event", "unknown")),
+        "failure_code": (
+            str(event["failure_code"])[:120]
+            if event.get("failure_code") is not None
+            else None
+        ),
+        "session_id": str(event.get("session_id", ""))[:200],
+        "round_id": str(event.get("round_id", ""))[:200],
+        "retrieval_request_id": (
+            str(event["retrieval_request_id"])[:200]
+            if event.get("retrieval_request_id") is not None
+            else None
+        ),
+        "delivered_value_ids": [
+            str(value_id)[:200]
+            for value_id in list(event.get("delivered_value_ids", []))[:_MAX_CONTEXT_IDS]
+        ],
+        "context_injected": bool(event.get("context_injected", False)),
+        "captured": bool(event.get("captured", False)),
+        "ready_files": int(event.get("ready_files", 0) or 0),
+    }
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        target.parent.chmod(0o700)
+        with target.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n")
+        target.chmod(0o600)
+    except OSError:
+        # Certification evidence must never change the host's hook behavior.
+        logger.debug("cannot write Hermes hook trace", exc_info=True)
 
 
 def _hermes_home() -> Path:
@@ -56,6 +99,7 @@ class ActiveRoundState:
     assistant_message_id: MessageId = None
     retrieval_request_id: str | None = None
     delivered_value_ids: list[str] = field(default_factory=list)
+    context_view: ContextView | None = None
     captured_events: list[dict[str, Any]] = field(default_factory=list)
     tool_calls_by_id: dict[str, dict[str, Any]] = field(default_factory=dict)
     resolution_metadata: dict[str, Any] = field(default_factory=dict)
@@ -227,6 +271,18 @@ class HermesPluginRuntime:
 
     def on_pre_llm_call(self, **kwargs: Any) -> dict[str, str] | None:
         session_id = self._text(kwargs.get("session_id"), "session")
+        _append_hook_trace(
+            {
+                "event": "pre_llm_call_start",
+                "session_id": session_id,
+                "round_id": str(kwargs.get("turn_id") or ""),
+                "retrieval_request_id": None,
+                "delivered_value_ids": [],
+                "context_injected": False,
+                "captured": False,
+                "ready_files": 0,
+            }
+        )
         self._acquire_runtime_lease(session_id)
         state = self._begin_llm_round(session_id, kwargs.get("turn_id"), kwargs)
         self._update_resolution_metadata(state, kwargs)
@@ -235,31 +291,90 @@ class HermesPluginRuntime:
             self._ensure_user_event(state, query, kwargs)
         if not isinstance(query, str) or not query.strip():
             return None
-        try:
-            future: Future[dict[str, Any]] = self._context_executor.submit(
-                self.client.retrieve_context,
-                memory_space_id=self.config.memory_space_id,
-                query=query,
-                limit=self.config.context_limit,
-            )
-        except RuntimeError:
-            return None
-        try:
-            response = future.result(timeout=self.config.context_timeout_seconds)
-        except TimeoutError:
-            future.cancel()
-            return None
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("context retrieval failed: %s", type(exc).__name__)
-            return None
+        response: dict[str, Any] | None = None
+        for attempt in range(_MAX_CONTEXT_RETRIEVAL_ATTEMPTS):
+            try:
+                future: Future[dict[str, Any]] = self._context_executor.submit(
+                    self.client.retrieve_context,
+                    memory_space_id=self.config.memory_space_id,
+                    query=query,
+                    limit=self.config.context_limit,
+                )
+            except RuntimeError:
+                _append_hook_trace(
+                    {
+                        "event": "pre_llm_call_failure",
+                        "session_id": state.session_id,
+                        "round_id": state.round_id,
+                        "failure_code": "context_executor_unavailable",
+                    }
+                )
+                return None
+            try:
+                response = future.result(timeout=self.config.context_timeout_seconds)
+                break
+            except TimeoutError:
+                future.cancel()
+                if attempt == _MAX_CONTEXT_RETRIEVAL_ATTEMPTS - 1:
+                    _append_hook_trace(
+                        {
+                            "event": "pre_llm_call_failure",
+                            "session_id": state.session_id,
+                            "round_id": state.round_id,
+                            "failure_code": "context_timeout",
+                        }
+                    )
+                    return None
+                logger.debug("context retrieval timed out; retrying")
+            except Exception as exc:  # noqa: BLE001
+                if attempt == _MAX_CONTEXT_RETRIEVAL_ATTEMPTS - 1:
+                    _append_hook_trace(
+                        {
+                            "event": "pre_llm_call_failure",
+                            "session_id": state.session_id,
+                            "round_id": state.round_id,
+                            "failure_code": f"context_{type(exc).__name__}",
+                        }
+                    )
+                    logger.debug("context retrieval failed: %s", type(exc).__name__)
+                    return None
+                logger.debug(
+                    "context retrieval failed: %s; retrying", type(exc).__name__
+                )
         if not isinstance(response, Mapping):
+            _append_hook_trace(
+                {
+                    "event": "pre_llm_call_failure",
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "failure_code": "context_non_mapping",
+                }
+            )
             return None
         try:
             context_view = ContextView.model_validate(response)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            _append_hook_trace(
+                {
+                    "event": "pre_llm_call_failure",
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "failure_code": f"context_{type(exc).__name__}",
+                }
+            )
             return None
         self._record_context_retrieval(state, context_view)
         context = self._format_context(context_view)
+        _append_hook_trace(
+            {
+                "event": "pre_llm_call",
+                "session_id": state.session_id,
+                "round_id": state.round_id,
+                "retrieval_request_id": state.retrieval_request_id,
+                "delivered_value_ids": state.delivered_value_ids,
+                "context_injected": bool(context),
+            }
+        )
         return {"context": context} if context else None
 
     def on_pre_tool_call(self, **kwargs: Any) -> None:
@@ -344,6 +459,7 @@ class HermesPluginRuntime:
         metadata = self._pending_metadata(state, completed_at)
         extensions = metadata.get("extensions")
         source_extensions = metadata.get("source_extensions")
+        captured = False
         try:
             self.capture.capture_or_defer(
                 session_id=state.session_id,
@@ -357,6 +473,7 @@ class HermesPluginRuntime:
                     source_extensions if isinstance(source_extensions, Mapping) else None
                 ),
             )
+            captured = True
         except Exception as exc:  # noqa: BLE001
             # Keep complete structural evidence for delayed recovery. The
             # pending worker validates it and eventually quarantines it.
@@ -371,6 +488,23 @@ class HermesPluginRuntime:
                     type(pending_exc).__name__,
                 )
         finally:
+            ready_dir = getattr(self.spool, "ready_dir", None)
+            ready_files = (
+                len(list(ready_dir.glob("*.json")))
+                if isinstance(ready_dir, Path)
+                else 0
+            )
+            _append_hook_trace(
+                {
+                    "event": "post_llm_call",
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "retrieval_request_id": state.retrieval_request_id,
+                    "delivered_value_ids": state.delivered_value_ids,
+                    "captured": captured,
+                    "ready_files": ready_files,
+                }
+            )
             self._complete_round(state)
             self.loop.wake()
 
@@ -668,6 +802,7 @@ class HermesPluginRuntime:
         with self._lock:
             if state.completed:
                 return
+            state.context_view = response
             state.retrieval_request_id = response.retrieval_request_id
             known_ids = set(state.delivered_value_ids)
             for item in response.items:
@@ -697,6 +832,7 @@ class HermesPluginRuntime:
     def _clear_context_refs(state: ActiveRoundState) -> None:
         state.retrieval_request_id = None
         state.delivered_value_ids.clear()
+        state.context_view = None
 
     def _ensure_user_event(
         self, state: ActiveRoundState, content: object, kwargs: Mapping[str, Any]

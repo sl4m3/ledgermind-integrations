@@ -7,9 +7,34 @@ from typing import Literal
 from pydantic import Field, model_validator
 
 from .models import ProtocolModel
-from .object_facet import MAX_CONTEXT_IDS, RetrievalItem
+from .object_facet import (
+    MAX_CONTEXT_IDS,
+    MAX_SOURCE_EVENT_IDS,
+    RetrievalItem,
+    _validate_ids,
+)
 
-ContextViewItem = RetrievalItem
+
+class ContextViewItem(RetrievalItem):
+    """Public Local item, whose Core-owned event provenance is not exposed.
+
+    ``RetrievalResponse`` remains strict and requires source event ids.  Local's
+    public ContextView deliberately strips those internal ids before handing
+    context to integrations, so this boundary accepts an omitted/empty list.
+    """
+
+    source_event_ids: list[str] = Field(
+        default_factory=list,
+        max_length=MAX_SOURCE_EVENT_IDS,
+    )
+
+    @model_validator(mode="after")
+    def validate_item(self) -> ContextViewItem:
+        if self.source_event_ids:
+            _validate_ids(self.source_event_ids, "source_event_ids", MAX_SOURCE_EVENT_IDS)
+        if self.explanation.item_facet != self.facet:
+            raise ValueError("explanation item_facet must match the item facet")
+        return self
 
 
 class ContextView(ProtocolModel):

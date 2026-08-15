@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -12,6 +14,41 @@ from ledgermind_protocol import LedgerMindResolution, build_resolution_extension
 from ...runtime.spool import FileSpool
 from .config import HermesConfig
 from .round_capture import build_raw_round
+
+
+_RAW_ROUND_SNAPSHOT_ENV = "LEDGERMIND_HERMES_RAW_ROUND_SNAPSHOT_PATH"
+
+
+def _write_raw_round_snapshot(payload: Mapping[str, Any]) -> None:
+    """Persist a private pre-delivery copy for an external host verifier.
+
+    Local intentionally removes raw request bodies after accepting them.  The
+    official-host lifecycle gate therefore needs a copy made before the
+    delivery worker can clear that body.  The file is opt-in, private, and is
+    never sent as part of the hook trace.
+    """
+
+    configured = os.environ.get(_RAW_ROUND_SNAPSHOT_ENV)
+    if not configured:
+        return
+    target = Path(configured).expanduser()
+    target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.tmp")
+    encoded = (
+        json.dumps(dict(payload), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode("utf-8")
+    try:
+        with temporary.open("wb") as handle:
+            os.chmod(temporary, 0o600)
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+        os.chmod(target, 0o600)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+        raise
 
 
 class HermesRoundCapture:
@@ -120,6 +157,7 @@ class HermesRoundCapture:
             adapter_version=self.config.adapter_version,
             source_schema_version=self.config.source_schema_version,
         )
+        _write_raw_round_snapshot(payload)
         return self.spool.enqueue_ready(payload["idempotency_key"], payload)
 
     def resolution_extension(

@@ -89,6 +89,7 @@ EmbeddingPurpose: TypeAlias = Literal[
     "subject_query",
     "object_mention",
     "object_card",
+    "target_card",
     "value_record",
     "retrieval_query",
     "facet_catalog",
@@ -827,6 +828,11 @@ class ExtractedValue(ProtocolModel):
     related_object_refs: list[str] = Field(default_factory=list, max_length=MAX_RELATED_REFS)
     facet: Facet
     content: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+    content_language: str | None = Field(default=None, min_length=1, max_length=32)
+    conditions: list[ClaimCondition] = Field(
+        default_factory=list,
+        max_length=MAX_CLAIM_CONDITIONS,
+    )
     source_event_ids: list[str] = Field(min_length=1, max_length=MAX_SOURCE_EVENT_IDS)
     scope_text: str | None = Field(default=None, min_length=1, max_length=MAX_SCOPE_TEXT_LENGTH)
     valid_from: str | None = None
@@ -838,6 +844,14 @@ class ExtractedValue(ProtocolModel):
         for object_ref in self.related_object_refs:
             _require_identifier(object_ref, "related object ref")
         _validate_unique(self.related_object_refs, "related_object_refs")
+        if self.content_language is not None:
+            _require_text(self.content_language, "content language", 32)
+        for condition in self.conditions:
+            condition._validate_condition_fields()
+        _validate_unique(
+            [(condition.source_event_id, condition.surface_text) for condition in self.conditions],
+            "conditions",
+        )
         _validate_ids(self.source_event_ids, "source_event_ids", MAX_SOURCE_EVENT_IDS)
         _validate_validity_window(self.valid_from, self.valid_to)
         return self
@@ -1012,10 +1026,19 @@ def validate_raw_round_extensions(
 class FacetActivation(ProtocolModel):
     facet: Facet
     score: float = Field(ge=0.0, le=1.0)
+    embedding_similarity_raw: float = 0.0
+    relative_margin: float = Field(default=0.0, ge=0.0, le=1.0)
+    lexical_cues: list[str] = Field(
+        default_factory=list, max_length=MAX_EXPLANATION_SIGNALS
+    )
     signals: list[str] = Field(default_factory=list, max_length=MAX_EXPLANATION_SIGNALS)
 
     @model_validator(mode="after")
     def validate_activation(self) -> FacetActivation:
+        if not math.isfinite(self.embedding_similarity_raw):
+            raise ValueError("facet embedding similarity must be finite")
+        for cue in self.lexical_cues:
+            _require_text(cue, "facet lexical cue", MAX_IDENTIFIER_LENGTH)
         for signal in self.signals:
             _require_text(signal, "facet activation signal", MAX_IDENTIFIER_LENGTH)
         return self
@@ -1029,9 +1052,20 @@ class ScoreComponents(ProtocolModel):
     object_similarity_raw: float = Field(default=0.0, ge=0.0, le=1.0)
     object_card_cosine: float = Field(default=0.0, ge=0.0, le=1.0)
     lexical_object_match: float = Field(default=0.0, ge=0.0, le=1.0)
+    object_embedding_similarity_raw: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    object_embedding_contribution: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    object_lexical_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    object_lexical_contribution: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
     object_contribution: float = Field(ge=0.0, le=1.0)
     facet_compatibility: float = Field(ge=0.0, le=1.0)
     facet_compatibility_raw: float = Field(default=0.0, ge=0.0, le=1.0)
+    facet_similarity_raw: float | None = Field(default=None, ge=0.0, le=1.0)
     facet_contribution: float = Field(ge=0.0, le=1.0)
     scope_time_compatibility: float = Field(ge=0.0, le=1.0)
     scope_time_contribution: float = Field(ge=0.0, le=1.0)
@@ -1064,8 +1098,20 @@ class RetrievalItem(ProtocolModel):
     value_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     primary_object_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     object_name: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    target_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    target_name: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    target_breadcrumb: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        exclude_if=lambda value: not value,
+    )
     facet: Facet
     content: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+    content_language: str | None = Field(default=None, min_length=1, max_length=32)
+    conditions: list[ClaimCondition] = Field(
+        default_factory=list,
+        max_length=MAX_CLAIM_CONDITIONS,
+    )
     source_event_ids: list[str] = Field(min_length=1, max_length=MAX_SOURCE_EVENT_IDS)
     relevance: float = Field(ge=0.0, le=1.0)
     explanation: RetrievalExplanation
@@ -1075,6 +1121,20 @@ class RetrievalItem(ProtocolModel):
         _require_identifier(self.value_id, "value id")
         _require_identifier(self.primary_object_id, "primary object id")
         _require_text(self.object_name, "object name", MAX_IDENTIFIER_LENGTH)
+        if self.target_id is not None:
+            _require_identifier(self.target_id, "target id")
+        if self.target_name is not None:
+            _require_text(self.target_name, "target name", MAX_IDENTIFIER_LENGTH)
+        if self.content_language is not None:
+            _require_text(self.content_language, "content language", 32)
+        for condition in self.conditions:
+            condition._validate_condition_fields()
+        _validate_unique(
+            [(condition.source_event_id, condition.surface_text) for condition in self.conditions],
+            "conditions",
+        )
+        for breadcrumb in self.target_breadcrumb:
+            _require_text(breadcrumb, "target breadcrumb", MAX_IDENTIFIER_LENGTH)
         _validate_ids(self.source_event_ids, "source_event_ids", MAX_SOURCE_EVENT_IDS)
         if self.explanation.item_facet != self.facet:
             raise ValueError("explanation item_facet must match the item facet")
@@ -1084,7 +1144,7 @@ class RetrievalItem(ProtocolModel):
 class RetrievalRequest(ProtocolModel):
     """Core retrieval request with the query embedding supplied by Local."""
 
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2, 3] = 2
     memory_space_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     query_text: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
     query_embedding: list[float] = Field(min_length=1, max_length=MAX_EMBEDDING_DIMENSIONS)
@@ -1099,6 +1159,9 @@ class RetrievalRequest(ProtocolModel):
         min_length=1,
         max_length=MAX_IDENTIFIER_LENGTH,
     )
+    target_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    target_alias: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
+    query_language: str | None = Field(default=None, min_length=1, max_length=32)
     related_object_ids: list[str] | None = None
     requested_facets: list[Facet] | None = None
     explanation_level: ExplanationLevel = "compact"
@@ -1118,13 +1181,16 @@ class RetrievalRequest(ProtocolModel):
             if len(self.requested_facets) > MAX_REQUESTED_FACETS:
                 raise ValueError(f"requested_facets must not exceed {MAX_REQUESTED_FACETS} entries")
             _validate_unique(self.requested_facets, "requested_facets")
+        if self.query_language is not None:
+            _require_text(self.query_language, "query language", 32)
         return self
 
 
 class RetrievalResponse(ProtocolModel):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[2, 3] = 2
     retrieval_request_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     items: list[RetrievalItem] = Field(max_length=MAX_RETRIEVAL_ITEMS)
+    target_resolution: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_response(self) -> RetrievalResponse:
