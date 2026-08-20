@@ -130,7 +130,7 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
     )
     payload = handshake.to_payload()
     assert payload["knowledge_schema_version"] == CORE_KNOWLEDGE_SCHEMA_VERSION
-    assert CORE_KNOWLEDGE_SCHEMA_VERSION == 15
+    assert CORE_KNOWLEDGE_SCHEMA_VERSION == 1
     capabilities = payload["capabilities"]
     assert isinstance(capabilities, dict)
     assert capabilities["core_owned_backup"] is True

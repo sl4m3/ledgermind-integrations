@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 from typing import Any, ClassVar
 
 CORE_IPC_PROTOCOL_VERSION = 1
-CORE_KNOWLEDGE_SCHEMA_VERSION = 15
+CORE_KNOWLEDGE_SCHEMA_VERSION = 1
 CORE_IPC_CAPABILITIES = frozenset(
     {
         "coordinated_restore",
