@@ -200,3 +200,31 @@ def test_register_captures_and_delivers_one_round_without_model_call(
         assert not any(path == "/models" for path, _ in _LocalHandler.requests)
     finally:
         runtime.stop()
+
+
+def test_disabled_plugin_registers_no_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "enabled": False,
+                "endpoint": "http://127.0.0.1:8765",
+                "memory_space_id": "project-main",
+                "source_instance_id": "hermes-test",
+                "profile_id": "default",
+                "state_db_path": str(tmp_path / "state.db"),
+                "spool_dir": str(tmp_path / "spool"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LEDGERMIND_HERMES_CONFIG", str(config_path))
+    context = _FakeContext()
+
+    plugin_entry.register(context)
+
+    assert context.callbacks == {}
+    assert plugin_entry._runtime is not None
+    assert plugin_entry._runtime.runtime_started is False

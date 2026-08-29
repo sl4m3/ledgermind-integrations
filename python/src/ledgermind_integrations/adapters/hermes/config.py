@@ -17,6 +17,7 @@ class HermesConfig:
     profile_id: str
     state_db_path: str
     spool_dir: str
+    enabled: bool = True
     adapter_version: str = "hermes-python/0.1.0"
     source_schema_version: int = 1
     allow_remote: bool = False
@@ -70,6 +71,7 @@ def load_config(path: str | Path) -> HermesConfig:
     if not isinstance(raw_repository_mapping, Mapping):
         raise TypeError("Hermes repository_mapping must be an object")
     return HermesConfig(
+        enabled=bool(payload.get("enabled", True)),
         endpoint=str(payload["endpoint"]),
         token_file=str(payload.get("token_file", "~/.ledgermind/server.token")),
         memory_space_id=str(payload["memory_space_id"]),

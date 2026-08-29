@@ -13,6 +13,8 @@ def register(ctx: HermesPluginContext) -> None:
     if _runtime is not None:
         _runtime.shutdown()
     _runtime = HermesPluginRuntime.from_context(ctx)
+    if not _runtime.config.enabled:
+        return
     _runtime.register_hooks(ctx)
     _runtime.start()
 
