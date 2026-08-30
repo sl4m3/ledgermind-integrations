@@ -30,6 +30,8 @@ include = ["ledgermind_integrations*"]
 [tool.setuptools.package-data]
 ledgermind_integrations = ["py.typed"]
 "ledgermind_integrations.adapters.hermes" = ["plugin.yaml"]
+"ledgermind_integrations.adapters.opencode" = ["ledgermind.js"]
+"ledgermind_integrations.adapters.openclaw" = ["index.js", "package.json", "openclaw.plugin.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

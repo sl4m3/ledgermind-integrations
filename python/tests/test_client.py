@@ -10,6 +10,7 @@ import ledgermind_integrations
 from ledgermind_integrations.runtime import lease as lease_module
 from ledgermind_integrations.runtime.client import (
     LedgerMindClient,
+    LedgerMindNetworkError,
     LedgerMindResponseError,
 )
 
@@ -163,3 +164,56 @@ def test_runtime_bootstrap_updates_endpoint_and_waits_for_health(
     )
 
     assert result["lease_id"] == "lease-1"
+
+
+def test_runtime_bootstrap_releases_lease_when_service_never_becomes_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeClient:
+        endpoint = "http://127.0.0.1:8765"
+        timeout = 0.1
+
+        def health_live(self) -> dict[str, Any]:
+            raise LedgerMindNetworkError("offline")
+
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        if "acquire" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "runtime": {
+                            "lease_id": "lease-orphan",
+                            "endpoint": "http://127.0.0.1:8766",
+                        }
+                    }
+                ),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="{}", stderr="")
+
+    ticks = iter((0.0, 0.0, 6.0))
+    monkeypatch.setattr(lease_module.subprocess, "run", run)
+    monkeypatch.setattr(lease_module.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(lease_module.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(RuntimeError, match="did not become ready"):
+        lease_module._bootstrap_runtime(
+            cast(Any, FakeClient()),
+            client_id="codex",
+            session_id="session-1",
+            command="ledgermind",
+        )
+
+    assert len(commands) == 2
+    assert commands[1][-5:] == [
+        "runtime",
+        "release",
+        "--lease-id",
+        "lease-orphan",
+        "--json",
+    ]

@@ -73,9 +73,11 @@ def _response(request_id: str, value_ids: list[str]) -> dict[str, Any]:
 class _Client:
     def __init__(self, responses: list[dict[str, Any] | None]) -> None:
         self.responses = responses
+        self.context_calls = 0
         self.submitted: list[dict[str, Any]] = []
 
     def retrieve_context(self, **_: Any) -> dict[str, Any] | None:
+        self.context_calls += 1
         response = self.responses.pop(0)
         return response
 
@@ -220,35 +222,56 @@ def test_pre_delivery_snapshot_preserves_context_extension(
         runtime.shutdown()
 
 
-def test_multiple_retrievals_keep_last_request_and_first_seen_ids(tmp_path: Path) -> None:
+def test_tool_loop_reuses_one_context_snapshot_for_the_user_turn(tmp_path: Path) -> None:
     client = _Client(
         [
             _response("retrieval-1", ["value-1", "value-2"]),
-            _response("retrieval-2", ["value-2", "value-3"]),
         ]
     )
     spool = FileSpool(tmp_path / "spool")
     runtime = HermesPluginRuntime(config=_config(tmp_path), client=client, spool=spool)  # type: ignore[arg-type]
     try:
-        runtime.on_pre_llm_call(
+        first = runtime.on_pre_llm_call(
             session_id="session-1", turn_id="turn-1", user_message="first question"
         )
-        runtime.on_pre_llm_call(
+        _complete(runtime, "session-1", "turn-1")
+        second = runtime.on_pre_llm_call(
             session_id="session-1", turn_id="turn-1", user_message="second question"
         )
         state = runtime.get_active_round("session-1", "turn-1")
         assert state is not None
-        assert state.retrieval_request_id == "retrieval-2"
-        assert state.delivered_value_ids == ["value-1", "value-2", "value-3"]
+        assert state.retrieval_request_id == "retrieval-1"
+        assert state.delivered_value_ids == ["value-1", "value-2"]
+        assert second == first
+        assert client.context_calls == 1
+        assert client.responses == []
+    finally:
+        runtime.shutdown()
 
+
+def test_new_user_turn_refreshes_context_snapshot(tmp_path: Path) -> None:
+    client = _Client(
+        [
+            _response("retrieval-1", ["value-1"]),
+            _response("retrieval-2", ["value-2"]),
+        ]
+    )
+    runtime = HermesPluginRuntime(
+        config=_config(tmp_path), client=client, spool=FileSpool(tmp_path / "spool")  # type: ignore[arg-type]
+    )
+    try:
+        first = runtime.on_pre_llm_call(
+            session_id="session-1", turn_id="turn-1", user_message="same question"
+        )
         _complete(runtime, "session-1", "turn-1")
+        second = runtime.on_pre_llm_call(
+            session_id="session-1", turn_id="turn-2", user_message="same question"
+        )
 
-        context = _ready_payloads(spool)[0]["extensions"]["ledgermind_context"]
-        assert context == {
-            "schema_version": 1,
-            "retrieval_request_id": "retrieval-2",
-            "delivered_value_ids": ["value-1", "value-2", "value-3"],
-        }
+        assert first is not None and "Content for value-1" in first["context"]
+        assert second is not None and "Content for value-2" in second["context"]
+        assert client.context_calls == 2
+        assert client.responses == []
     finally:
         runtime.shutdown()
 
@@ -288,9 +311,15 @@ def test_context_refs_are_isolated_between_sessions(tmp_path: Path) -> None:
         _complete(runtime, "session-1", "turn-1")
         _complete(runtime, "session-2", "turn-2")
 
+        deadline = time.monotonic() + 1.0
+        observed: list[dict[str, Any]] = []
+        while time.monotonic() < deadline:
+            observed = [*client.submitted, *_ready_payloads(spool)]
+            if len(observed) >= 2:
+                break
+            time.sleep(0.01)
         payloads = {
-            payload["source"]["session_id"]: payload
-            for payload in _ready_payloads(spool)
+            payload["source"]["session_id"]: payload for payload in observed
         }
         assert payloads["session-1"]["extensions"]["ledgermind_context"] == {
             "schema_version": 1,

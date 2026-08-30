@@ -114,6 +114,9 @@ class SessionState:
     active_round_id: str | None = None
     last_completed_round_id: str | None = None
     completed_rounds: int = 0
+    context_turn_key: str | None = None
+    context_view: ContextView | None = None
+    formatted_context: str = ""
 
 
 class HermesPluginRuntime:
@@ -193,10 +196,17 @@ class HermesPluginRuntime:
         return cls(config=config, client=client, spool=spool, hermes_metadata=metadata)
 
     def register_hooks(self, ctx: HermesPluginContext) -> None:
-        ctx.register_hook("pre_llm_call", self.on_pre_llm_call)
-        ctx.register_hook("pre_tool_call", self.on_pre_tool_call)
-        ctx.register_hook("post_tool_call", self.on_post_tool_call)
-        ctx.register_hook("post_llm_call", self.on_post_llm_call)
+        def active(callback: Any) -> Any:
+            def wrapped(**kwargs: Any) -> Any:
+                self.start()
+                return callback(**kwargs)
+
+            return wrapped
+
+        ctx.register_hook("pre_llm_call", active(self.on_pre_llm_call))
+        ctx.register_hook("pre_tool_call", active(self.on_pre_tool_call))
+        ctx.register_hook("post_tool_call", active(self.on_post_tool_call))
+        ctx.register_hook("post_llm_call", active(self.on_post_llm_call))
         ctx.register_hook("on_session_end", self.on_session_end)
         ctx.register_hook("on_session_finalize", self.on_session_finalize)
 
@@ -291,6 +301,29 @@ class HermesPluginRuntime:
             self._ensure_user_event(state, query, kwargs)
         if not isinstance(query, str) or not query.strip():
             return None
+        context_turn_key = self._context_turn_key(kwargs)
+        session_state = self.session_states[state.session_id]
+        with self._lock:
+            cached_context_view = (
+                session_state.context_view
+                if context_turn_key is not None
+                and session_state.context_turn_key == context_turn_key
+                else None
+            )
+            cached_context = session_state.formatted_context
+        if cached_context_view is not None:
+            self._record_context_retrieval(state, cached_context_view)
+            _append_hook_trace(
+                {
+                    "event": "pre_llm_call",
+                    "session_id": state.session_id,
+                    "round_id": state.round_id,
+                    "retrieval_request_id": state.retrieval_request_id,
+                    "delivered_value_ids": state.delivered_value_ids,
+                    "context_injected": bool(cached_context),
+                }
+            )
+            return {"context": cached_context} if cached_context else None
         response: dict[str, Any] | None = None
         for attempt in range(_MAX_CONTEXT_RETRIEVAL_ATTEMPTS):
             try:
@@ -365,6 +398,11 @@ class HermesPluginRuntime:
             return None
         self._record_context_retrieval(state, context_view)
         context = self._format_context(context_view)
+        if context_turn_key is not None:
+            with self._lock:
+                session_state.context_turn_key = context_turn_key
+                session_state.context_view = context_view
+                session_state.formatted_context = context
         _append_hook_trace(
             {
                 "event": "pre_llm_call",
@@ -376,6 +414,27 @@ class HermesPluginRuntime:
             }
         )
         return {"context": context} if context else None
+
+    @classmethod
+    def _context_turn_key(cls, kwargs: Mapping[str, Any]) -> str | None:
+        """Return a host-stable identity for one user turn when available."""
+
+        turn_id = cls._text(kwargs.get("turn_id"), "")
+        if turn_id:
+            return f"turn:{turn_id}"
+        user_message_id = cls._message_id_from_kwargs(kwargs, "user_message_id")
+        if user_message_id is not None:
+            return f"message:{user_message_id}"
+        history = kwargs.get("conversation_history")
+        if isinstance(history, Sequence) and not isinstance(history, (str, bytes)):
+            user_messages = sum(
+                1
+                for message in history
+                if isinstance(message, Mapping) and message.get("role") == "user"
+            )
+            if user_messages:
+                return f"history-user:{user_messages}"
+        return None
 
     def on_pre_tool_call(self, **kwargs: Any) -> None:
         session_id = self._text(kwargs.get("session_id"), "session")

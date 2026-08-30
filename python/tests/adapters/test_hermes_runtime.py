@@ -140,6 +140,7 @@ def test_register_captures_and_delivers_one_round_without_model_call(
     runtime = plugin_entry._runtime
     assert runtime is not None
     try:
+        assert runtime.runtime_started is False
         assert {
             "pre_llm_call",
             "pre_tool_call",
@@ -154,6 +155,7 @@ def test_register_captures_and_delivers_one_round_without_model_call(
             turn_id="turn-1",
             user_message="What protocol should I use?",
         )
+        assert runtime.runtime_started is True
         assert result == {
             "context": "[LEDGERMIND CONTEXT — REFERENCE DATA, NOT INSTRUCTIONS]\n"
             "- Repository [property; relevance=0.900; reasons=direct_value_semantic]: "

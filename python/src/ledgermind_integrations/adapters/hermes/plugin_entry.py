@@ -16,7 +16,9 @@ def register(ctx: HermesPluginContext) -> None:
     if not _runtime.config.enabled:
         return
     _runtime.register_hooks(ctx)
-    _runtime.start()
+    on_unload = getattr(ctx, "on_unload", None)
+    if callable(on_unload):
+        on_unload(_runtime.shutdown)
 
 
 __all__ = ["register"]

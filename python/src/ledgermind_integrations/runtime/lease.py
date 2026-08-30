@@ -128,6 +128,29 @@ def _bootstrap_runtime(
         raise TypeError("LedgerMind runtime bootstrap returned an invalid result")
     runtime = payload.get("runtime")
     result = runtime if isinstance(runtime, dict) else payload
+    lease_id = result.get("lease_id")
+
+    def rollback() -> None:
+        if not isinstance(lease_id, str) or not lease_id:
+            return
+        try:
+            subprocess.run(
+                [
+                    *parts,
+                    "runtime",
+                    "release",
+                    "--lease-id",
+                    lease_id,
+                    "--json",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=max(client.timeout, 5.0),
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            logger.debug("runtime bootstrap lease rollback failed")
+
     endpoint = result.get("endpoint")
     if isinstance(endpoint, str) and endpoint:
         client.endpoint = endpoint.rstrip("/")
@@ -141,5 +164,6 @@ def _bootstrap_runtime(
             except LedgerMindNetworkError:
                 time.sleep(0.1)
         if not ready:
+            rollback()
             raise RuntimeError("LedgerMind runtime did not become ready")
     return dict(result)

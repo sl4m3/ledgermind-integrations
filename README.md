@@ -39,6 +39,27 @@ provenance — это чувствительные данные, даже есл
 Архивы и quarantine records обрабатывайте как чувствительные backup artifacts;
 передавайте их только по доверенному каналу.
 
+## Supported clients
+
+The platform bundle contains first-party adapters for:
+
+- Hermes;
+- Codex CLI;
+- Claude Code;
+- Cursor;
+- OpenCode;
+- OpenClaw.
+
+All six adapters use the same public `RawRound` and `ContextView` contracts.
+Command-hook clients use one local lifecycle bridge; OpenCode and OpenClaw use
+small native JavaScript plugins which call that bridge. No adapter contains
+knowledge-resolution logic.
+
+The bridge retrieves context before a turn, labels it as untrusted reference
+data, captures actual tool calls and results, and submits one completed round.
+Transport failures are fail-open for the agent while the validated RawRound is
+kept in the private retry spool.
+
 ## Hermes plugin package
 
 Установка регистрирует plugin entrypoint и поставляет `plugin.yaml`:
@@ -54,7 +75,7 @@ ledgermind-integrations install hermes --destination ~/.hermes/plugins
 ## Package boundary
 
 Wheel Integrations должен содержать только namespaced
-`ledgermind_integrations` runtime, Hermes plugin entry и bundled
-`adapters/hermes/plugin.yaml`; build-копии, test DB, `.pyc`, private keys и
-секретные env-файлы в release contents не входят. Общий `ledgermind-protocol`
-поставляет `py.typed`, RawRound schema, canonical JSON и conformance fixtures.
+`ledgermind_integrations` runtime, first-party adapter payloads и public hook
+bridge; build-копии, test DB, `.pyc`, private keys и секретные env-файлы в
+release contents не входят. Общий `ledgermind-protocol` поставляет `py.typed`,
+RawRound schema, canonical JSON и conformance fixtures.
