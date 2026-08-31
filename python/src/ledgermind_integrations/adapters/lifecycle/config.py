@@ -23,6 +23,7 @@ class LifecycleConfig:
     heartbeat_seconds: float = 10.0
     adapter_version: str = "lifecycle-python/0.1.0"
     allow_remote: bool = False
+    managed_runtime: bool = False
 
 
 _REQUIRED = (
@@ -62,6 +63,7 @@ def load_lifecycle_config(path: str | Path) -> LifecycleConfig:
             payload.get("adapter_version", "lifecycle-python/0.1.0")
         ),
         allow_remote=bool(payload.get("allow_remote", False)),
+        managed_runtime=bool(payload.get("managed_runtime", False)),
     )
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,19 @@ def _config(tmp_path: Path, *, enabled: bool = True) -> LifecycleConfig:
         runtime_command="ledgermind",
         enabled=enabled,
     )
+
+
+def test_managed_runtime_skips_local_lease(tmp_path: Path, monkeypatch) -> None:
+    config = replace(_config(tmp_path), managed_runtime=True)
+    sentinel = object()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: sentinel)
+
+    def unexpected_acquire(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("managed runtimes must not acquire a local runtime lease")
+
+    monkeypatch.setattr(bridge_module.RuntimeLease, "acquire", unexpected_acquire)
+    with bridge_module._leased_client(config, "session") as client:
+        assert client is sentinel
 
 
 def test_recall_is_advisory_and_round_is_delivered(tmp_path: Path, monkeypatch) -> None:

@@ -130,6 +130,9 @@ def _leased_client(
     config: LifecycleConfig, session_id: str
 ) -> Iterator[LedgerMindClient]:
     client = _client(config)
+    if config.managed_runtime:
+        yield client
+        return
     lease = RuntimeLease.acquire(
         client,
         client_id=config.target,
