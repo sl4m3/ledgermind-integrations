@@ -14,12 +14,29 @@ from ledgermind_protocol import (
 )
 
 
+def _is_canonical_content_part(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    if not set(value).issubset({"type", "text", "data", "uri"}):
+        return False
+    part_type = value.get("type")
+    if part_type == "text":
+        return isinstance(value.get("text"), str)
+    if part_type == "json":
+        return value.get("data") is not None
+    if part_type == "reference":
+        return isinstance(value.get("uri"), str)
+    return False
+
+
 def _content(value: object) -> list[dict[str, Any]]:
     if value is None:
         return []
     if isinstance(value, str):
         return [{"type": "text", "text": value}]
-    if isinstance(value, list) and all(isinstance(item, Mapping) for item in value):
+    if isinstance(value, list) and all(
+        _is_canonical_content_part(item) for item in value
+    ):
         return [dict(item) for item in value]
     return [{"type": "json", "data": value}]
 

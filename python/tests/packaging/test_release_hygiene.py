@@ -114,7 +114,7 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
             integrations = tomllib.load(handle)["project"]["dependencies"]
         with (ROOT / "protocol" / "python" / "pyproject.toml").open("rb") as handle:
             protocol = tomllib.load(handle)["project"]["dependencies"]
-        self.assertEqual(integrations, ["ledgermind-protocol>=2.0.0a1,<2.1"])
+        self.assertEqual(integrations, ["ledgermind-protocol>=2.0.0b1,<2.1"])
         self.assertEqual(protocol, ["pydantic>=2.7,<3"])
 
     def test_protocol_source_inventory_uses_stable_names(self) -> None:
@@ -122,6 +122,19 @@ class IntegrationsReleaseScriptTests(unittest.TestCase):
         self.assertTrue((protocol_source / "object_facet.py").is_file())
         script = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("ledgermind_protocol/object_facet.py", script)
+
+    def test_lifecycle_runtime_is_required_and_smoke_imported(self) -> None:
+        script = SCRIPT.read_text(encoding="utf-8")
+        for relative in (
+            "ledgermind_integrations/adapters/lifecycle/__init__.py",
+            "ledgermind_integrations/adapters/lifecycle/bridge.py",
+            "ledgermind_integrations/adapters/lifecycle/config.py",
+        ):
+            self.assertIn(relative, script)
+        self.assertIn(
+            "importlib.import_module('ledgermind_integrations.adapters.lifecycle')",
+            script,
+        )
 
     def test_verify_rejects_changed_artifact(self) -> None:
         commit, timestamp = self._head()

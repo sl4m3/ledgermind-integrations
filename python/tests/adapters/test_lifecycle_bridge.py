@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +88,49 @@ def test_recall_is_advisory_and_round_is_delivered(tmp_path: Path, monkeypatch) 
     assert json.loads(state.read_text(encoding="utf-8")) == {}
 
 
+def test_host_specific_tool_result_blocks_are_preserved_as_json(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = _config(tmp_path)
+    provider_blocks = [{"text": "result", "provider_metadata": {"kind": "host"}}]
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-1", "prompt": "Run the workflow"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {
+            "session_id": "session-1",
+            "tool_name": "search",
+            "tool_use_id": "call-1",
+            "tool_input": {},
+        },
+    )
+    handle_hook(
+        config,
+        "PostToolUse",
+        {
+            "session_id": "session-1",
+            "tool_name": "search",
+            "tool_use_id": "call-1",
+            "tool_response": provider_blocks,
+        },
+    )
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-1", "last_assistant_message": "Done"},
+    )
+
+    result = client.submitted[0]["round"]["events"][2]["content"]
+    assert result == [{"type": "json", "data": provider_blocks}]
+
+
 def test_disabled_bridge_is_a_noop(tmp_path: Path) -> None:
     assert handle_hook(
         _config(tmp_path, enabled=False),
@@ -94,3 +138,141 @@ def test_disabled_bridge_is_a_noop(tmp_path: Path) -> None:
         {"session_id": "session-1", "prompt": "hello"},
     ) == {}
     assert not (tmp_path / "spool").exists()
+
+
+def test_user_prompt_is_persisted_before_recall_starts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    config = _config(tmp_path)
+    state_path = tmp_path / "spool" / "sessions" / "session-1.json"
+
+    @contextmanager
+    def inspected_client(_config: LifecycleConfig, _session_id: str):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        assert state["events"][0]["content"] == "Persist this first"
+        yield client
+
+    monkeypatch.setattr(bridge_module, "_leased_client", inspected_client)
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-1", "prompt": "Persist this first"},
+    )
+
+
+def test_stop_enqueues_and_clears_state_before_delivery(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    config = _config(tmp_path)
+    state_path = tmp_path / "spool" / "sessions" / "session-1.json"
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-1", "prompt": "Run the workflow"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {"session_id": "session-1", "tool_name": "shell", "tool_input": {}},
+    )
+
+    @contextmanager
+    def inspected_client(_config: LifecycleConfig, _session_id: str):
+        assert json.loads(state_path.read_text(encoding="utf-8")) == {}
+        assert len(list((tmp_path / "spool" / "ready-delivery").glob("*.json"))) == 1
+        yield client
+
+    monkeypatch.setattr(bridge_module, "_leased_client", inspected_client)
+
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-1", "last_assistant_message": "Done"},
+    )
+
+    assert len(client.submitted) == 1
+
+
+def test_session_end_only_performs_durable_local_handoff(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    config = _config(tmp_path)
+    state_path = tmp_path / "spool" / "sessions" / "session-1.json"
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-1", "prompt": "Run the workflow"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {"session_id": "session-1", "tool_name": "shell", "tool_input": {}},
+    )
+    monkeypatch.setattr(
+        bridge_module,
+        "_leased_client",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network I/O")),
+    )
+
+    handle_hook(config, "SessionEnd", {"session_id": "session-1"})
+
+    assert json.loads(state_path.read_text(encoding="utf-8")) == {}
+    assert len(list((tmp_path / "spool" / "ready-delivery").glob("*.json"))) == 1
+
+
+def test_stop_discards_unusable_tool_only_state(tmp_path: Path, monkeypatch) -> None:
+    config = _config(tmp_path)
+    state_path = tmp_path / "spool" / "sessions" / "session-1.json"
+    handle_hook(
+        config,
+        "PreToolUse",
+        {"session_id": "session-1", "tool_name": "shell", "tool_input": {}},
+    )
+    monkeypatch.setattr(
+        bridge_module,
+        "_leased_client",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("network I/O")),
+    )
+
+    handle_hook(config, "Stop", {"session_id": "session-1"})
+
+    assert json.loads(state_path.read_text(encoding="utf-8")) == {}
+    assert not list((tmp_path / "spool" / "ready-delivery").glob("*.json"))
+
+
+def test_stop_drops_orphan_tool_result_after_process_restart(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    config = _config(tmp_path)
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-1", "prompt": "Run the workflow"},
+    )
+    handle_hook(
+        config,
+        "PostToolUse",
+        {
+            "session_id": "session-1",
+            "tool_name": "shell",
+            "tool_use_id": "orphan-call",
+            "tool_response": "done",
+        },
+    )
+
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-1", "last_assistant_message": "Done"},
+    )
+
+    events = client.submitted[0]["round"]["events"]
+    assert [event["kind"] for event in events] == ["message", "message"]

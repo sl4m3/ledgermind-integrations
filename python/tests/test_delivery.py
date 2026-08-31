@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -59,3 +60,17 @@ def test_delivery_failure_metadata_does_not_include_exception_payload(tmp_path: 
     failed_text = failed.read_text(encoding="utf-8")
     assert "TOP_SECRET" not in failed_text
     assert json.loads(failed_text)["delivery"]["failure_reason"] == "delivery_error"
+
+
+def test_spool_delivery_status_is_content_free_and_clearable(tmp_path: Path) -> None:
+    spool = FileSpool(tmp_path / "spool")
+
+    spool.note_delivery_failure("RuntimeError: payload=TOP_SECRET")
+
+    payload = json.loads(spool.delivery_status_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "pending"
+    assert payload["reason"] == "RuntimeError"
+    assert "TOP_SECRET" not in spool.delivery_status_path.read_text(encoding="utf-8")
+    assert stat.S_IMODE(spool.delivery_status_path.stat().st_mode) == 0o600
+    spool.clear_delivery_failure()
+    assert not spool.delivery_status_path.exists()

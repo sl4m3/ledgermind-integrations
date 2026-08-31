@@ -15,7 +15,6 @@ from ...runtime.spool import FileSpool
 from .config import HermesConfig
 from .round_capture import build_raw_round
 
-
 _RAW_ROUND_SNAPSHOT_ENV = "LEDGERMIND_HERMES_RAW_ROUND_SNAPSHOT_PATH"
 
 

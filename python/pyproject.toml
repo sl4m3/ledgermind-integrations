@@ -10,7 +10,7 @@ license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "COPYING"]
 requires-python = ">=3.10"
 dependencies = [
-    "ledgermind-protocol>=2.0.0a1,<2.1",
+    "ledgermind-protocol>=2.0.0b1,<2.1",
 ]
 
 [project.optional-dependencies]

@@ -56,7 +56,10 @@ export const LedgerMindPlugin = async ({ directory }) => {
         if (response) bridge("assistant", { session_id: sessionID, response })
         lastText.delete(sessionID)
         contextBySession.delete(sessionID)
-        bridge("SessionEnd", { session_id: sessionID, cwd: directory })
+        // OpenCode awaits the idle event handler even in `opencode run` mode,
+        // so use Stop here: it durably enqueues the round and synchronously
+        // flushes ready delivery before the short-lived process exits.
+        bridge("Stop", { session_id: sessionID, cwd: directory })
       }
     },
   }

@@ -49,6 +49,7 @@ class FileSpool:
         self.max_files = max(int(max_files), 1)
         self.inflight_ttl_seconds = max(float(inflight_ttl_seconds), 0.1)
         self.worker_id = worker_id or f"worker-{uuid4().hex}"
+        self.delivery_status_path = self.root / "delivery-status.json"
 
     def _ensure(self) -> None:
         try:
@@ -333,6 +334,18 @@ class FileSpool:
             inflight=len(list(self.inflight_dir.glob("*.json"))),
             failed=len(list(self.failed_dir.glob("*.json"))),
         )
+
+    def note_delivery_failure(self, reason: str) -> None:
+        """Persist a content-free operational diagnostic beside the durable queue."""
+
+        safe_reason = self._safe_key(str(reason).split(":", 1)[0])[:120]
+        self._write(
+            self.delivery_status_path,
+            {"status": "pending", "reason": safe_reason, "updated_at": time.time()},
+        )
+
+    def clear_delivery_failure(self) -> None:
+        self.delivery_status_path.unlink(missing_ok=True)
 
 
 __all__ = [

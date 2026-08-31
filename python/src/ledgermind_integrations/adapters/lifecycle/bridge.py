@@ -171,10 +171,38 @@ def _append(state: dict[str, Any], event: dict[str, Any]) -> None:
         events.append(event)
 
 
-def _finish(config: LifecycleConfig, session_id: str, state: dict[str, Any]) -> None:
+def _enqueue_finished_round(
+    config: LifecycleConfig, session_id: str, state: dict[str, Any]
+) -> bool:
+    """Durably enqueue a completed round without doing any network I/O."""
+
     events = state.get("events")
     if not isinstance(events, list) or not events:
-        return
+        return False
+    if not any(
+        isinstance(event, Mapping)
+        and event.get("kind") == "message"
+        and event.get("role") == "user"
+        for event in events
+    ):
+        # RawRound requires a user message. Keeping tool-only or assistant-only
+        # state would mix separate turns when the next prompt arrives.
+        state.clear()
+        return False
+    known_tool_calls = {
+        event.get("tool_call_id")
+        for event in events
+        if isinstance(event, Mapping) and event.get("kind") == "tool_call"
+    }
+    events[:] = [
+        event
+        for event in events
+        if not (
+            isinstance(event, Mapping)
+            and event.get("kind") == "tool_result"
+            and event.get("tool_call_id") not in known_tool_calls
+        )
+    ]
     if not any(isinstance(event, Mapping) and event.get("final") for event in events):
         _append(
             state,
@@ -195,12 +223,23 @@ def _finish(config: LifecycleConfig, session_id: str, state: dict[str, Any]) -> 
     )
     spool = FileSpool(config.spool_dir)
     spool.enqueue_ready(raw_round["idempotency_key"], raw_round)
+    state.clear()
+    return True
+
+
+def _deliver_ready(config: LifecycleConfig, session_id: str) -> None:
+    """Best-effort delivery performed only after lifecycle state is durable."""
+
+    spool = FileSpool(config.spool_dir)
     try:
         with _leased_client(config, session_id) as client:
             DeliveryWorker(spool, client).run_once(limit=10)
-    except (LedgerMindClientError, OSError, RuntimeError, ValueError):
-        pass
-    state.clear()
+        if spool.stats().ready_delivery:
+            spool.note_delivery_failure("delivery_pending_retry")
+        else:
+            spool.clear_delivery_failure()
+    except (LedgerMindClientError, OSError, RuntimeError, ValueError) as exc:
+        spool.note_delivery_failure(type(exc).__name__)
 
 
 def handle_hook(
@@ -212,25 +251,31 @@ def handle_hook(
         return {}
     session_id = _session_id(payload)
     normalized = event.lower().replace("_", "").replace("-", "")
-    with _locked_state(config, session_id) as state:
-        state.setdefault("round_id", uuid4().hex)
-        state.setdefault("started_at", _now())
-        if normalized in {"userpromptsubmit", "beforesubmitprompt", "prompt"}:
+    if normalized in {"userpromptsubmit", "beforesubmitprompt", "prompt"}:
+        # Persist the prompt before starting the runtime or making a provider
+        # request. Host hook timeouts must never discard the user's turn.
+        with _locked_state(config, session_id) as state:
+            state.setdefault("round_id", uuid4().hex)
+            state.setdefault("started_at", _now())
             prompt = _prompt(payload)
             if prompt:
                 _append(state, {"kind": "message", "role": "user", "content": prompt})
-            try:
-                with _leased_client(config, session_id) as client:
-                    response = client.retrieve_context(
-                        memory_space_id=config.memory_space_id,
-                        query=prompt,
-                        limit=config.context_limit,
-                    )
-                context = _format_context(response)
-            except (LedgerMindClientError, OSError, RuntimeError, ValueError):
-                context = ""
-            return {"additional_context": context} if context else {}
-        if normalized in {"pretooluse", "beforetoolcall"}:
+        try:
+            with _leased_client(config, session_id) as client:
+                response = client.retrieve_context(
+                    memory_space_id=config.memory_space_id,
+                    query=prompt,
+                    limit=config.context_limit,
+                )
+            context = _format_context(response)
+        except (LedgerMindClientError, OSError, RuntimeError, ValueError) as exc:
+            FileSpool(config.spool_dir).note_delivery_failure(type(exc).__name__)
+            context = ""
+        return {"additional_context": context} if context else {}
+    if normalized in {"pretooluse", "beforetoolcall"}:
+        with _locked_state(config, session_id) as state:
+            state.setdefault("round_id", uuid4().hex)
+            state.setdefault("started_at", _now())
             name, arguments, call_id = _tool(payload)
             _append(
                 state,
@@ -241,8 +286,11 @@ def handle_hook(
                     "arguments": arguments,
                 },
             )
-            return {}
-        if normalized in {"posttooluse", "posttoolusefailure", "aftertoolcall"}:
+        return {}
+    if normalized in {"posttooluse", "posttoolusefailure", "aftertoolcall"}:
+        with _locked_state(config, session_id) as state:
+            state.setdefault("round_id", uuid4().hex)
+            state.setdefault("started_at", _now())
             name, _arguments, call_id = _tool(payload)
             value, status = _result(payload)
             _append(
@@ -255,8 +303,11 @@ def handle_hook(
                     "content": value,
                 },
             )
-            return {}
-        if normalized in {"afteragentresponse", "assistant", "llmoutput"}:
+        return {}
+    if normalized in {"afteragentresponse", "assistant", "llmoutput"}:
+        with _locked_state(config, session_id) as state:
+            state.setdefault("round_id", uuid4().hex)
+            state.setdefault("started_at", _now())
             answer = payload.get(
                 "response",
                 payload.get("assistant", payload.get("message", payload.get("text", ""))),
@@ -266,16 +317,23 @@ def handle_hook(
                     state,
                     {"kind": "message", "role": "assistant", "content": answer, "final": True},
                 )
-            return {}
-        if normalized in {"stop", "sessionend", "agentend"}:
+        return {}
+    if normalized in {"stop", "sessionend", "agentend"}:
+        with _locked_state(config, session_id) as state:
+            state.setdefault("round_id", uuid4().hex)
+            state.setdefault("started_at", _now())
             answer = payload.get("last_assistant_message", payload.get("response", ""))
             if _text(answer):
                 _append(
                     state,
                     {"kind": "message", "role": "assistant", "content": answer, "final": True},
                 )
-            _finish(config, session_id, state)
-            return {}
+            enqueued = _enqueue_finished_round(config, session_id, state)
+        # SessionEnd has a host-enforced maximum of three seconds. Its job is
+        # the durable local handoff; a normal background Stop performs delivery.
+        if enqueued and normalized != "sessionend":
+            _deliver_ready(config, session_id)
+        return {}
     return {}
 
 

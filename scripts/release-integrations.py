@@ -52,6 +52,9 @@ PROTOCOL_REQUIRED_WHEEL_FILES = {
 INTEGRATIONS_REQUIRED_WHEEL_FILES = {
     "ledgermind_integrations/__init__.py",
     "ledgermind_integrations/py.typed",
+    "ledgermind_integrations/adapters/lifecycle/__init__.py",
+    "ledgermind_integrations/adapters/lifecycle/bridge.py",
+    "ledgermind_integrations/adapters/lifecycle/config.py",
     "ledgermind_integrations/adapters/hermes/plugin.yaml",
     "ledgermind_integrations/adapters/hermes/plugin_entry.py",
     "ledgermind_integrations/adapters/hermes/runtime.py",
@@ -495,8 +498,11 @@ def _smoke_install(
             (
                 "import importlib, inspect; "
                 "importlib.import_module('ledgermind_protocol'); "
+                "lifecycle = importlib.import_module('ledgermind_integrations.adapters.lifecycle'); "
                 "runtime = importlib.import_module('ledgermind_integrations.adapters.hermes.runtime'); "
                 "migration = importlib.import_module('ledgermind_integrations.runtime.spool_migration'); "
+                "assert hasattr(lifecycle, 'handle_hook'); "
+                "assert hasattr(lifecycle, 'load_lifecycle_config'); "
                 "assert hasattr(runtime, 'ActiveRoundState'); "
                 "assert hasattr(runtime.HermesPluginRuntime, 'finish_session'); "
                 "assert hasattr(migration, 'migrate_spool'); "
@@ -514,6 +520,8 @@ def _smoke_install(
         "passed": True,
         "imports": [
             "ledgermind_protocol",
+            "ledgermind_integrations.adapters.lifecycle.handle_hook",
+            "ledgermind_integrations.adapters.lifecycle.load_lifecycle_config",
             "ledgermind_integrations.adapters.hermes.runtime.ActiveRoundState",
             "ledgermind_integrations.adapters.hermes.runtime.HermesPluginRuntime.finish_session",
             "ledgermind_integrations.runtime.spool_migration.migrate_spool",

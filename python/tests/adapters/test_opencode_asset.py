@@ -28,6 +28,8 @@ def test_opencode_injection_uses_ephemeral_system_context() -> None:
     assert "firstTextPart.text =" not in asset
     assert "output.parts.unshift" not in asset
     assert "contextBySession.delete(sessionID)" in asset
+    assert 'bridge("Stop", { session_id: sessionID, cwd: directory })' in asset
+    assert 'bridge("SessionEnd", { session_id: sessionID, cwd: directory })' not in asset
 
 
 def test_opencode_context_is_reused_but_never_persisted_in_message_parts(
