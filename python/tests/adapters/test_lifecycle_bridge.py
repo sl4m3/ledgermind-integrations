@@ -233,6 +233,55 @@ def test_exit_code_is_preserved_in_structured_tool_result(
     }
 
 
+def test_exit_code_inside_json_string_marks_tool_result_as_error(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = _config(tmp_path)
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-json-exit", "prompt": "Check LedgerMind"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {
+            "session_id": "session-json-exit",
+            "tool_name": "Bash",
+            "tool_use_id": "call-json-exit",
+            "tool_input": {"command": "ledgermind doctor --json"},
+        },
+    )
+    response = json.dumps(
+        {"status": "failed", "exit_code": 11, "errors": ["doctor found failures"]}
+    )
+    handle_hook(
+        config,
+        "PostToolUse",
+        {
+            "session_id": "session-json-exit",
+            "tool_name": "Bash",
+            "tool_use_id": "call-json-exit",
+            "tool_response": response,
+        },
+    )
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-json-exit", "last_assistant_message": "Doctor failed"},
+    )
+
+    result = client.submitted[0]["round"]["events"][2]
+    assert result["status"] == "error"
+    assert result["content"][0]["data"] == {
+        "output": response,
+        "exit_code": 11,
+    }
+
+
 def test_oversized_round_keeps_trajectory_and_compacts_only_tool_payload(
     tmp_path: Path, monkeypatch
 ) -> None:

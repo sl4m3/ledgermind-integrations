@@ -68,6 +68,19 @@ def _nested_value(payload: Mapping[str, Any], keys: tuple[str, ...]) -> object |
             return payload[key]
     for container_key in ("tool_response", "toolResponse", "result", "output"):
         nested = payload.get(container_key)
+        if isinstance(nested, str):
+            candidate = nested.strip()
+            if (
+                len(candidate) <= 1_000_000
+                and candidate.startswith("{")
+                and candidate.endswith("}")
+            ):
+                try:
+                    parsed = json.loads(candidate)
+                except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, Mapping):
+                    nested = parsed
         if isinstance(nested, Mapping):
             for key in keys:
                 if key in nested:
