@@ -118,6 +118,7 @@ def test_complete_core_operation_inventory_is_advertisable() -> None:
             "record_retrieval_outcome",
             "run_control_maintenance",
             "get_object_facet_statistics",
+            "delete_memory_space",
             "shutdown",
         }
     )
