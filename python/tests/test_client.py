@@ -141,6 +141,7 @@ def test_runtime_bootstrap_updates_endpoint_and_waits_for_health(
             "--json",
         ]
         assert kwargs["check"] is False
+        assert kwargs["timeout"] == 45.0
         return subprocess.CompletedProcess(
             command,
             0,

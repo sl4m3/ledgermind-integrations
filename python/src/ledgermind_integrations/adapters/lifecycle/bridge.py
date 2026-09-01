@@ -16,7 +16,7 @@ from uuid import uuid4
 from ...runtime.client import LedgerMindClient, LedgerMindClientError
 from ...runtime.delivery import DeliveryWorker
 from ...runtime.lease import RuntimeLease
-from ...runtime.spool import FileSpool
+from ...runtime.spool import FileSpool, SpoolFullError
 from ..hermes.round_capture import build_raw_round
 from .config import LifecycleConfig
 
@@ -174,6 +174,61 @@ def _append(state: dict[str, Any], event: dict[str, Any]) -> None:
         events.append(event)
 
 
+def _encoded_bytes(value: object) -> bytes:
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+
+
+def _omitted_tool_payload(value: object) -> dict[str, object]:
+    encoded = _encoded_bytes(value)
+    marker: dict[str, object] = {
+        "ledgermind_omitted": True,
+        "reason": "raw_round_payload_budget",
+        "original_bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+    if isinstance(value, str) and not (
+        value.startswith("data:") and ";base64," in value[:256]
+    ):
+        marker["preview"] = value[:512]
+    return marker
+
+
+def _compact_tool_events(
+    events: list[object], *, max_encoded_bytes: int, max_item_bytes: int = 190_000
+) -> list[object]:
+    """Keep one trajectory while shedding only the largest tool payloads."""
+
+    compacted = json.loads(json.dumps(events, ensure_ascii=False))
+    if not isinstance(compacted, list):
+        return list(events)
+    current_size = sum(len(_encoded_bytes(event)) for event in compacted)
+    candidates: list[tuple[int, int, str]] = []
+    for index, event in enumerate(compacted):
+        if not isinstance(event, dict):
+            continue
+        field = (
+            "arguments"
+            if event.get("kind") == "tool_call" and "arguments" in event
+            else "content"
+            if event.get("kind") == "tool_result" and "content" in event
+            else ""
+        )
+        if field:
+            candidates.append((len(_encoded_bytes(event[field])), index, field))
+    for old_size, index, field in sorted(candidates, reverse=True):
+        if current_size <= max_encoded_bytes and old_size <= max_item_bytes:
+            break
+        event = compacted[index]
+        if not isinstance(event, dict):
+            continue
+        marker = _omitted_tool_payload(event[field])
+        event[field] = marker
+        current_size += len(_encoded_bytes(marker)) - old_size
+    return compacted
+
+
 def _enqueue_finished_round(
     config: LifecycleConfig, session_id: str, state: dict[str, Any]
 ) -> bool:
@@ -212,20 +267,34 @@ def _enqueue_finished_round(
             {"kind": "message", "role": "assistant", "content": "Session completed", "final": True},
         )
     round_id = _text(state.get("round_id")) or uuid4().hex
-    raw_round = build_raw_round(
-        memory_space_id=config.memory_space_id,
-        source_system=config.target,
-        source_instance_id=config.source_instance_id,
-        profile_id=config.profile_id,
-        session_id=session_id,
-        round_id=round_id,
-        started_at=_text(state.get("started_at")) or _now(),
-        completed_at=_now(),
-        events=events,
-        adapter_version=config.adapter_version,
-    )
     spool = FileSpool(config.spool_dir)
-    spool.enqueue_ready(raw_round["idempotency_key"], raw_round)
+    def build(candidate_events: list[object]) -> dict[str, Any]:
+        return build_raw_round(
+            memory_space_id=config.memory_space_id,
+            source_system=config.target,
+            source_instance_id=config.source_instance_id,
+            profile_id=config.profile_id,
+            session_id=session_id,
+            round_id=round_id,
+            started_at=_text(state.get("started_at")) or _now(),
+            completed_at=_now(),
+            events=candidate_events,
+            adapter_version=config.adapter_version,
+        )
+
+    candidate_events = _compact_tool_events(
+        events,
+        max_encoded_bytes=max(spool.max_payload_bytes - 256_000, 1),
+    )
+    raw_round = build(candidate_events)
+    try:
+        spool.enqueue_ready(raw_round["idempotency_key"], raw_round)
+    except SpoolFullError as exc:
+        if str(exc) != "payload byte limit exceeded":
+            raise
+        compacted = _compact_tool_events(events, max_encoded_bytes=1)
+        raw_round = build(compacted)
+        spool.enqueue_ready(raw_round["idempotency_key"], raw_round)
     state.clear()
     return True
 

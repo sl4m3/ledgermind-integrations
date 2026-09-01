@@ -16,6 +16,8 @@ from .client import LedgerMindClient, LedgerMindNetworkError
 
 logger = logging.getLogger(__name__)
 
+RUNTIME_BOOTSTRAP_TIMEOUT_SECONDS = 45.0
+
 
 @dataclass(slots=True)
 class RuntimeLease:
@@ -113,7 +115,10 @@ def _bootstrap_runtime(
             ],
             capture_output=True,
             text=True,
-            timeout=max(client.timeout, 5.0),
+            # A cold secure-runtime start verifies the signed Core and waits
+            # for Local readiness.  Killing the supervisor after the normal
+            # HTTP request timeout leaves its detached child untracked.
+            timeout=max(client.timeout, RUNTIME_BOOTSTRAP_TIMEOUT_SECONDS),
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:

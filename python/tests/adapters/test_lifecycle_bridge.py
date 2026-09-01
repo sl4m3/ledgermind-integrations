@@ -145,6 +145,59 @@ def test_host_specific_tool_result_blocks_are_preserved_as_json(
     assert result == [{"type": "json", "data": provider_blocks}]
 
 
+def test_oversized_round_keeps_trajectory_and_compacts_only_tool_payload(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = _config(tmp_path)
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-large", "prompt": "Inspect the generated image"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {
+            "session_id": "session-large",
+            "tool_name": "view_image",
+            "tool_use_id": "call-large",
+            "tool_input": {"path": "/tmp/image.png"},
+        },
+    )
+    handle_hook(
+        config,
+        "PostToolUse",
+        {
+            "session_id": "session-large",
+            "tool_name": "view_image",
+            "tool_use_id": "call-large",
+            "tool_response": "data:image/png;base64," + "A" * 5_100_000,
+        },
+    )
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-large", "last_assistant_message": "Image inspected"},
+    )
+
+    assert len(client.submitted) == 1
+    events = client.submitted[0]["round"]["events"]
+    assert [event["kind"] for event in events] == [
+        "message",
+        "tool_call",
+        "tool_result",
+        "message",
+    ]
+    omitted = events[2]["content"][0]["data"]
+    assert omitted["ledgermind_omitted"] is True
+    assert omitted["reason"] == "raw_round_payload_budget"
+    assert omitted["original_bytes"] > 5_000_000
+    assert "preview" not in omitted
+
+
 def test_disabled_bridge_is_a_noop(tmp_path: Path) -> None:
     assert handle_hook(
         _config(tmp_path, enabled=False),
