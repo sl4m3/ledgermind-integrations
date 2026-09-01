@@ -62,7 +62,31 @@ def _tool(payload: Mapping[str, Any]) -> tuple[str, object, str]:
     return _text(name) or "tool", arguments, _text(call_id)
 
 
-def _result(payload: Mapping[str, Any]) -> tuple[object, str]:
+def _nested_value(payload: Mapping[str, Any], keys: tuple[str, ...]) -> object | None:
+    for key in keys:
+        if key in payload:
+            return payload[key]
+    for container_key in ("tool_response", "toolResponse", "result", "output"):
+        nested = payload.get(container_key)
+        if isinstance(nested, Mapping):
+            for key in keys:
+                if key in nested:
+                    return nested[key]
+    return None
+
+
+def _exit_code(payload: Mapping[str, Any]) -> int | None:
+    value = _nested_value(payload, ("exit_code", "exitCode", "code"))
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
+def _result(payload: Mapping[str, Any], event: str) -> tuple[object, str]:
     value = payload.get(
         "tool_response",
         payload.get(
@@ -75,7 +99,24 @@ def _result(payload: Mapping[str, Any]) -> tuple[object, str]:
             ),
         ),
     )
-    status = "error" if payload.get("is_error") or payload.get("error") else "success"
+    exit_code = _exit_code(payload)
+    explicit_status = _text(_nested_value(payload, ("status",))).lower()
+    status = (
+        "error"
+        if event == "posttoolusefailure"
+        or payload.get("is_error") is True
+        or bool(payload.get("error"))
+        or exit_code is not None
+        and exit_code != 0
+        or explicit_status in {"error", "failed", "failure", "cancelled", "canceled"}
+        else "success"
+    )
+    if exit_code is not None:
+        if isinstance(value, Mapping):
+            value = dict(value)
+            value.setdefault("exit_code", exit_code)
+        else:
+            value = {"output": value, "exit_code": exit_code}
     return value, status
 
 
@@ -396,7 +437,7 @@ def handle_hook(
             state.setdefault("round_id", uuid4().hex)
             state.setdefault("started_at", _now())
             name, _arguments, call_id = _tool(payload)
-            value, status = _result(payload)
+            value, status = _result(payload, normalized)
             _append(
                 state,
                 {

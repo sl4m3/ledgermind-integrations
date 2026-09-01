@@ -146,6 +146,93 @@ def test_host_specific_tool_result_blocks_are_preserved_as_json(
     assert result == [{"type": "json", "data": provider_blocks}]
 
 
+def test_failure_event_is_not_recorded_as_success(tmp_path: Path, monkeypatch) -> None:
+    client = _Client()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = _config(tmp_path)
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-failure", "prompt": "Run the tests"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {
+            "session_id": "session-failure",
+            "tool_name": "shell",
+            "tool_use_id": "call-failure",
+            "tool_input": {"command": "cargo test"},
+        },
+    )
+    handle_hook(
+        config,
+        "PostToolUseFailure",
+        {
+            "session_id": "session-failure",
+            "tool_name": "shell",
+            "tool_use_id": "call-failure",
+            "tool_response": "error: unexpected argument 'second_test' found",
+        },
+    )
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-failure", "last_assistant_message": "Tests failed"},
+    )
+
+    result = client.submitted[0]["round"]["events"][2]
+    assert result["status"] == "error"
+
+
+def test_exit_code_is_preserved_in_structured_tool_result(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = _config(tmp_path)
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-exit", "prompt": "Run the command"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {
+            "session_id": "session-exit",
+            "tool_name": "shell",
+            "tool_use_id": "call-exit",
+            "tool_input": {"command": "false"},
+        },
+    )
+    handle_hook(
+        config,
+        "PostToolUse",
+        {
+            "session_id": "session-exit",
+            "tool_name": "shell",
+            "tool_use_id": "call-exit",
+            "tool_response": "command failed",
+            "exit_code": 2,
+        },
+    )
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-exit", "last_assistant_message": "Command failed"},
+    )
+
+    result = client.submitted[0]["round"]["events"][2]
+    assert result["status"] == "error"
+    assert result["content"][0]["data"] == {
+        "output": "command failed",
+        "exit_code": 2,
+    }
+
+
 def test_oversized_round_keeps_trajectory_and_compacts_only_tool_payload(
     tmp_path: Path, monkeypatch
 ) -> None:
