@@ -195,12 +195,44 @@ def _omitted_tool_payload(value: object) -> dict[str, object]:
     return marker
 
 
+def _inline_binary_marker(value: str) -> dict[str, object]:
+    encoded = value.encode("utf-8")
+    header = value.split(",", 1)[0]
+    media_type = header[5:].split(";", 1)[0].strip().lower()
+    return {
+        "ledgermind_omitted": True,
+        "reason": "inline_binary_payload",
+        "media_type": media_type or "application/octet-stream",
+        "original_bytes": len(encoded),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+    }
+
+
+def _sanitize_inline_binary(value: object) -> object:
+    """Remove inline binary encodings without discarding surrounding evidence."""
+
+    if isinstance(value, str):
+        if value.startswith("data:") and ";base64," in value[:256]:
+            return _inline_binary_marker(value)
+        return value
+    if isinstance(value, list):
+        return [_sanitize_inline_binary(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_inline_binary(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _compact_tool_events(
     events: list[object], *, max_encoded_bytes: int, max_item_bytes: int = 190_000
 ) -> list[object]:
     """Keep one trajectory while shedding only the largest tool payloads."""
 
-    compacted = json.loads(json.dumps(events, ensure_ascii=False))
+    compacted = _sanitize_inline_binary(
+        json.loads(json.dumps(events, ensure_ascii=False))
+    )
     if not isinstance(compacted, list):
         return list(events)
     current_size = sum(len(_encoded_bytes(event)) for event in compacted)
@@ -355,7 +387,7 @@ def handle_hook(
                     "kind": "tool_call",
                     "tool_name": name,
                     "tool_call_id": call_id or f"call-{uuid4().hex}",
-                    "arguments": arguments,
+                    "arguments": _sanitize_inline_binary(arguments),
                 },
             )
         return {}
@@ -372,7 +404,7 @@ def handle_hook(
                     "tool_name": name,
                     "tool_call_id": call_id or f"call-{uuid4().hex}",
                     "status": status,
-                    "content": value,
+                    "content": _sanitize_inline_binary(value),
                 },
             )
         return {}

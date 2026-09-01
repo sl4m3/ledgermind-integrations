@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import contextmanager
 from dataclasses import replace
@@ -193,9 +194,69 @@ def test_oversized_round_keeps_trajectory_and_compacts_only_tool_payload(
     ]
     omitted = events[2]["content"][0]["data"]
     assert omitted["ledgermind_omitted"] is True
-    assert omitted["reason"] == "raw_round_payload_budget"
+    assert omitted["reason"] == "inline_binary_payload"
+    assert omitted["media_type"] == "image/png"
     assert omitted["original_bytes"] > 5_000_000
     assert "preview" not in omitted
+
+
+def test_inline_screenshot_is_removed_without_losing_tool_text(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = _config(tmp_path)
+    screenshot = "data:image/png;base64," + "A" * 140_000
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-image", "prompt": "Inspect the page"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {
+            "session_id": "session-image",
+            "tool_name": "browser",
+            "tool_use_id": "call-image",
+            "tool_input": {"url": "https://example.test/policy"},
+        },
+    )
+    handle_hook(
+        config,
+        "PostToolUse",
+        {
+            "session_id": "session-image",
+            "tool_name": "browser",
+            "tool_use_id": "call-image",
+            "tool_response": {
+                "content": [{"text": "Policy page is visible"}],
+                "_meta": {
+                    "codex/toolSurface": {
+                        "screenshot": {"url": screenshot, "width": 1280}
+                    }
+                },
+            },
+        },
+    )
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-image", "last_assistant_message": "Page checked"},
+    )
+
+    result = client.submitted[0]["round"]["events"][2]["content"][0]["data"]
+    assert result["content"] == [{"text": "Policy page is visible"}]
+    screenshot_marker = result["_meta"]["codex/toolSurface"]["screenshot"]["url"]
+    assert screenshot_marker == {
+        "ledgermind_omitted": True,
+        "reason": "inline_binary_payload",
+        "media_type": "image/png",
+        "original_bytes": len(screenshot.encode("utf-8")),
+        "sha256": hashlib.sha256(screenshot.encode("utf-8")).hexdigest(),
+    }
+    assert len(json.dumps(client.submitted[0], ensure_ascii=False)) < 10_000
 
 
 def test_disabled_bridge_is_a_noop(tmp_path: Path) -> None:
