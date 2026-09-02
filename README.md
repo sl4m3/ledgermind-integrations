@@ -58,7 +58,9 @@ knowledge-resolution logic.
 The bridge retrieves context before a turn, labels it as untrusted reference
 data, captures actual tool calls and results, and submits one completed round.
 Transport failures are fail-open for the agent while the validated RawRound is
-kept in the private retry spool.
+kept in the private retry spool. A later successful recall clears the stale
+transient network diagnostic, so current health reflects the current delivery
+path rather than an already recovered outage.
 
 ## Hermes plugin package
 

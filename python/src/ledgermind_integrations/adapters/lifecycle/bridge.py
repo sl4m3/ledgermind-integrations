@@ -426,6 +426,9 @@ def handle_hook(
                     limit=config.context_limit,
                 )
             context = _format_context(response)
+            spool = FileSpool(config.spool_dir)
+            if not spool.stats().ready_delivery:
+                spool.clear_delivery_failure()
         except (LedgerMindClientError, OSError, RuntimeError, ValueError) as exc:
             FileSpool(config.spool_dir).note_delivery_failure(type(exc).__name__)
             context = ""

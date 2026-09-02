@@ -103,6 +103,25 @@ def test_recall_is_advisory_and_round_is_delivered(tmp_path: Path, monkeypatch) 
     assert json.loads(state.read_text(encoding="utf-8")) == {}
 
 
+def test_successful_recall_clears_stale_network_diagnostic(
+    tmp_path: Path, monkeypatch
+) -> None:
+    client = _Client()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = _config(tmp_path)
+    spool = bridge_module.FileSpool(config.spool_dir)
+    spool.note_delivery_failure("LedgerMindNetworkError")
+
+    response = handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-1", "prompt": "Recall this"},
+    )
+
+    assert "additional_context" in response
+    assert not spool.delivery_status_path.exists()
+
+
 def test_host_specific_tool_result_blocks_are_preserved_as_json(
     tmp_path: Path, monkeypatch
 ) -> None:
