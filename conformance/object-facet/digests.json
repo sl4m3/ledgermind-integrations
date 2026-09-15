@@ -12,7 +12,7 @@
     "v_extraction_extended_name.json": "sha256:49d19587d1273d4b0fdd53c9164bbcf2005eb02393c8b98d80a373d666005785",
     "v_extraction_new.json": "sha256:a590e7c8a31f325d030f72f106f50df79dd3337417b3283e634fba4eba3b21f0",
     "v_ingest_request.json": "sha256:f868f1d71d6494d8f475cd9f8b5dbf94084e9248a32c644ca8fb835406715a51",
-    "v_operational_input.json": "sha256:ca872c1f8be031240aa10a414dbde82145bd25939c792759fe7b99ee4fb46217",
+    "v_operational_input.json": "sha256:44f8d14d6aef6db46479851fe49a85f7cc2a89a6b237d54adce94532f7825aa2",
     "v_retrieval_direct_semantic.json": "sha256:e935ce7a5e8e1ac91ee3d7c28794502a3fa01972ca8e1ece5bf0bef8439c01cf",
     "v_retrieval_outcome.json": "sha256:c8c2c5427bab686380e771f04e9cdb8669fab54d2c4e7d10701eb580cc2c65cf",
     "v_retrieval_request.json": "sha256:23eebdee18f36b967f616a327fc650aefec468391b53887b9a95aa06714bbbd6",

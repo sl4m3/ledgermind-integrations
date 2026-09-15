@@ -27,7 +27,7 @@
           "object_id": "obj-postgresql",
           "canonical_name": "PostgreSQL",
           "aliases": ["PG", "Postgres"],
-          "match_reasons": ["exact_alias", "repository_match"],
+          "match_reasons": ["technical_identifier_exact", "repository_match"],
           "rank": 1,
           "lexical_score": 1.0,
           "embedding_score": 0.94,

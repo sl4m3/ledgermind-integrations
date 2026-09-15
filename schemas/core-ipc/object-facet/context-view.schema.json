@@ -18,6 +18,7 @@
       "maxItems": 100,
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 1, "maxLength": 500}
-    }
+    },
+    "memory_injection": {"$ref": "retrieval-response.schema.json#/$defs/memory_injection"}
   }
 }

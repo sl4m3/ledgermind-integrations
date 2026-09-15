@@ -10,6 +10,7 @@ from .models import ProtocolModel
 from .object_facet import (
     MAX_CONTEXT_IDS,
     MAX_SOURCE_EVENT_IDS,
+    MemoryInjection,
     RetrievalItem,
     _validate_ids,
 )
@@ -42,6 +43,7 @@ class ContextView(ProtocolModel):
     retrieval_request_id: str = Field(min_length=1, max_length=500)
     items: list[ContextViewItem] = Field(max_length=100)
     delivered_value_ids: list[str] = Field(default_factory=list, max_length=MAX_CONTEXT_IDS)
+    memory_injection: MemoryInjection | None = None
 
     @model_validator(mode="after")
     def validate_delivery_refs(self) -> ContextView:
@@ -50,6 +52,10 @@ class ContextView(ProtocolModel):
         value_ids = {item.value_id for item in self.items}
         if not set(self.delivered_value_ids).issubset(value_ids):
             raise ValueError("delivered_value_ids must refer to returned items")
+        if self.memory_injection is not None and self.memory_injection.item_count != len(
+            self.items
+        ):
+            raise ValueError("memory_injection.item_count must match items")
         return self
 
 

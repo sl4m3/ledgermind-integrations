@@ -12,9 +12,25 @@
       "type": "array",
       "maxItems": 100,
       "items": {"$ref": "#/$defs/retrieval_item"}
-    }
+    },
+    "memory_injection": {"$ref": "#/$defs/memory_injection"}
   },
   "$defs": {
+    "memory_injection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "text", "legend", "item_count"],
+      "properties": {
+        "format": {"const": "facet_legend"},
+        "text": {"type": "string", "maxLength": 65536},
+        "legend": {
+          "type": "array",
+          "maxItems": 14,
+          "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+        },
+        "item_count": {"type": "integer", "minimum": 0, "maximum": 100}
+      }
+    },
     "facet": {
       "enum": [
         "identity",
@@ -74,7 +90,7 @@
           "uniqueItems": true,
           "items": {
             "enum": [
-              "exact_alias",
+              "technical_identifier_exact",
               "canonical_exact",
               "lexical_similarity",
               "object_card_embedding",

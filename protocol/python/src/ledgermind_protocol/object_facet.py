@@ -70,7 +70,7 @@ CoverageDisposition: TypeAlias = Literal[
     "insufficient_evidence",
 ]
 ObjectReason: TypeAlias = Literal[
-    "exact_alias",
+    "technical_identifier_exact",
     "canonical_exact",
     "lexical_similarity",
     "object_card_embedding",
@@ -120,7 +120,7 @@ FACET_VALUES = frozenset(
 )
 OBJECT_REASON_VALUES = frozenset(
     {
-        "exact_alias",
+        "technical_identifier_exact",
         "canonical_exact",
         "lexical_similarity",
         "object_card_embedding",
@@ -1186,15 +1186,37 @@ class RetrievalRequest(ProtocolModel):
         return self
 
 
+class MemoryInjection(ProtocolModel):
+    """Core-rendered, deterministic memory context for agent injection."""
+
+    format: Literal["facet_legend"]
+    text: str = Field(max_length=65_536)
+    legend: list[str] = Field(max_length=14)
+    item_count: int = Field(ge=0, le=MAX_RETRIEVAL_ITEMS)
+
+    @model_validator(mode="after")
+    def validate_injection(self) -> MemoryInjection:
+        for row in self.legend:
+            _require_text(row, "memory injection legend row", 1_024)
+        if self.item_count == 0 and self.text:
+            raise ValueError("empty retrieval must have empty memory injection text")
+        return self
+
+
 class RetrievalResponse(ProtocolModel):
     schema_version: Literal[2, 3] = 2
     retrieval_request_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     items: list[RetrievalItem] = Field(max_length=MAX_RETRIEVAL_ITEMS)
     target_resolution: dict[str, Any] | None = None
+    memory_injection: MemoryInjection | None = None
 
     @model_validator(mode="after")
     def validate_response(self) -> RetrievalResponse:
         _require_identifier(self.retrieval_request_id, "retrieval request id")
+        if self.memory_injection is not None and self.memory_injection.item_count != len(
+            self.items
+        ):
+            raise ValueError("memory_injection.item_count must match items")
         return self
 
 
