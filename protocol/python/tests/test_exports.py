@@ -31,6 +31,7 @@ def test_public_exports_are_boundary_models() -> None:
         "target_breadcrumb",
         "facet",
         "content",
+        "scope_text",
         "content_language",
         "conditions",
         "source_event_ids",

@@ -44,6 +44,7 @@ class ContextView(ProtocolModel):
     items: list[ContextViewItem] = Field(max_length=100)
     delivered_value_ids: list[str] = Field(default_factory=list, max_length=MAX_CONTEXT_IDS)
     memory_injection: MemoryInjection | None = None
+    selection_diagnostics: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def validate_delivery_refs(self) -> ContextView:

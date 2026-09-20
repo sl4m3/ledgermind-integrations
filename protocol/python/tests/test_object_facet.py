@@ -283,6 +283,22 @@ def test_retrieval_explanation_keeps_item_facet_out_of_activations() -> None:
     assert parsed.items[0].explanation.object_reasons == []
 
 
+def test_retrieval_response_accepts_bounded_core_diagnostics() -> None:
+    payload = _load_valid("v_retrieval_direct_semantic.json")
+    payload["retrieval_diagnostics"] = {
+        "candidate_value_ids": ["value-1"],
+        "pipeline": {"stage_counts": {"stored": 1}},
+    }
+
+    response = RetrievalResponse.model_validate(payload)
+
+    assert response.retrieval_diagnostics == payload["retrieval_diagnostics"]
+
+    payload["retrieval_diagnostics"] = []
+    with pytest.raises(ValidationError):
+        RetrievalResponse.model_validate(payload)
+
+
 def test_context_view_rejects_legacy_public_item_fields() -> None:
     payload = _load_valid("v_context_view.json")
     item = payload["items"][0]

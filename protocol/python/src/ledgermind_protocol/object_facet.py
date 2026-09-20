@@ -1050,6 +1050,10 @@ class ScoreComponents(ProtocolModel):
     semantic_contribution: float = Field(ge=0.0, le=1.0)
     object_similarity: float = Field(ge=0.0, le=1.0)
     object_similarity_raw: float = Field(default=0.0, ge=0.0, le=1.0)
+    primary_object_similarity: float = Field(default=0.0, ge=0.0, le=1.0, exclude_if=lambda value: value == 0.0)
+    related_object_similarity: float = Field(default=0.0, ge=0.0, le=1.0, exclude_if=lambda value: value == 0.0)
+    related_object_similarity_raw: float = Field(default=0.0, ge=0.0, le=1.0, exclude_if=lambda value: value == 0.0)
+    related_object_multiplier: float = Field(default=0.0, ge=0.0, le=1.0, exclude_if=lambda value: value == 0.0)
     object_card_cosine: float = Field(default=0.0, ge=0.0, le=1.0)
     lexical_object_match: float = Field(default=0.0, ge=0.0, le=1.0)
     object_embedding_similarity_raw: float | None = Field(
@@ -1107,6 +1111,7 @@ class RetrievalItem(ProtocolModel):
     )
     facet: Facet
     content: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
+    scope_text: str | None = Field(default=None, min_length=1, max_length=MAX_SCOPE_TEXT_LENGTH)
     content_language: str | None = Field(default=None, min_length=1, max_length=32)
     conditions: list[ClaimCondition] = Field(
         default_factory=list,
@@ -1141,6 +1146,28 @@ class RetrievalItem(ProtocolModel):
         return self
 
 
+class RetrievalFormulaTuning(ProtocolModel):
+    semantic: float | None = Field(default=None, ge=0.0, le=1.0)
+    object: float | None = Field(default=None, ge=0.0, le=1.0)
+    facet: float | None = Field(default=None, ge=0.0, le=1.0)
+    scope_time: float | None = Field(default=None, ge=0.0, le=1.0)
+    context: float | None = Field(default=None, ge=0.0, le=1.0)
+    recency: float | None = Field(default=None, ge=0.0, le=1.0)
+    support: float | None = Field(default=None, ge=0.0, le=1.0)
+    usage: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class RetrievalTuning(ProtocolModel):
+    formula: RetrievalFormulaTuning | None = None
+    global_semantic_top: int | None = Field(default=None, ge=1)
+    critical_relevance_min: float | None = Field(default=None, ge=0.0, le=1.0)
+    min_semantic_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    relative_score_window: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_context_items: int | None = Field(default=None, ge=1, le=MAX_RETRIEVAL_ITEMS)
+    min_final_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    related_object_multiplier: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
 class RetrievalRequest(ProtocolModel):
     """Core retrieval request with the query embedding supplied by Local."""
 
@@ -1151,6 +1178,8 @@ class RetrievalRequest(ProtocolModel):
     embedding_model_id: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     embedding_model_version: str = Field(min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     limit: int = Field(ge=1, le=MAX_RETRIEVAL_ITEMS)
+    base_limit: int | None = Field(default=None, ge=1, le=MAX_RETRIEVAL_ITEMS)
+    retrieval_tuning: RetrievalTuning | None = None
     project_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     repository_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
     task_id: str | None = Field(default=None, min_length=1, max_length=MAX_IDENTIFIER_LENGTH)
@@ -1175,6 +1204,8 @@ class RetrievalRequest(ProtocolModel):
             raise ValueError("query_embedding values must be finite and bounded")
         if self.repository_id is not None and self.project_id is None:
             raise ValueError("repository id requires a matching project id")
+        if self.base_limit is not None and self.base_limit > self.limit:
+            raise ValueError("base_limit must not exceed limit")
         if self.related_object_ids is not None:
             _validate_ids(self.related_object_ids, "related_object_ids", MAX_RELATED_REFS, minimum=0)
         if self.requested_facets is not None:
@@ -1209,6 +1240,7 @@ class RetrievalResponse(ProtocolModel):
     items: list[RetrievalItem] = Field(max_length=MAX_RETRIEVAL_ITEMS)
     target_resolution: dict[str, Any] | None = None
     memory_injection: MemoryInjection | None = None
+    retrieval_diagnostics: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_response(self) -> RetrievalResponse:
@@ -1217,6 +1249,14 @@ class RetrievalResponse(ProtocolModel):
             self.items
         ):
             raise ValueError("memory_injection.item_count must match items")
+        if self.retrieval_diagnostics is not None:
+            encoded = json.dumps(
+                self.retrieval_diagnostics,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(encoded) > 1_048_576:
+                raise ValueError("retrieval_diagnostics must not exceed 1 MiB")
         return self
 
 
