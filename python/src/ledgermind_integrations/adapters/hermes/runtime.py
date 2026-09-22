@@ -47,9 +47,7 @@ def _append_hook_trace(event: Mapping[str, Any]) -> None:
         "schema_version": 1,
         "event": str(event.get("event", "unknown")),
         "failure_code": (
-            str(event["failure_code"])[:120]
-            if event.get("failure_code") is not None
-            else None
+            str(event["failure_code"])[:120] if event.get("failure_code") is not None else None
         ),
         "session_id": str(event.get("session_id", ""))[:200],
         "round_id": str(event.get("round_id", ""))[:200],
@@ -254,6 +252,11 @@ class HermesPluginRuntime:
                 session_id=session_id,
                 heartbeat_seconds=self.config.runtime_heartbeat_seconds,
                 bootstrap_command=self.config.runtime_command,
+                ttl_seconds=(
+                    self.config.session_safety_ttl_seconds
+                    if self.config.model_residency_mode == "session"
+                    else None
+                ),
             )
             self.client.endpoint = lease_client.endpoint
             self._runtime_leases[session_id] = lease
@@ -371,9 +374,7 @@ class HermesPluginRuntime:
                     )
                     logger.debug("context retrieval failed: %s", type(exc).__name__)
                     return None
-                logger.debug(
-                    "context retrieval failed: %s; retrying", type(exc).__name__
-                )
+                logger.debug("context retrieval failed: %s; retrying", type(exc).__name__)
         if not isinstance(response, Mapping):
             _append_hook_trace(
                 {
@@ -548,11 +549,7 @@ class HermesPluginRuntime:
                 )
         finally:
             ready_dir = getattr(self.spool, "ready_dir", None)
-            ready_files = (
-                len(list(ready_dir.glob("*.json")))
-                if isinstance(ready_dir, Path)
-                else 0
-            )
+            ready_files = len(list(ready_dir.glob("*.json"))) if isinstance(ready_dir, Path) else 0
             _append_hook_trace(
                 {
                     "event": "post_llm_call",

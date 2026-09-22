@@ -63,6 +63,61 @@ def test_managed_runtime_skips_local_lease(tmp_path: Path, monkeypatch) -> None:
         assert client is sentinel
 
 
+def test_session_residency_keeps_one_lease_until_stop(tmp_path: Path, monkeypatch) -> None:
+    class SessionClient(_Client):
+        def __init__(self) -> None:
+            super().__init__()
+            self.acquires: list[dict[str, object]] = []
+            self.heartbeats: list[str] = []
+            self.releases: list[str] = []
+
+        def runtime_acquire(self, **kwargs: object) -> dict[str, str]:
+            self.acquires.append(dict(kwargs))
+            return {"lease_id": "session-lease"}
+
+        def runtime_heartbeat(self, lease_id: str) -> dict[str, str]:
+            self.heartbeats.append(lease_id)
+            return {"status": "ok"}
+
+        def runtime_release(self, lease_id: str) -> dict[str, str]:
+            self.releases.append(lease_id)
+            return {"status": "released"}
+
+    client = SessionClient()
+    monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
+    config = replace(
+        _config(tmp_path),
+        model_residency_mode="session",
+        session_safety_ttl_seconds=3_600.0,
+    )
+
+    handle_hook(
+        config,
+        "UserPromptSubmit",
+        {"session_id": "session-1", "prompt": "Remember the deployment"},
+    )
+    handle_hook(
+        config,
+        "PreToolUse",
+        {"session_id": "session-1", "tool_name": "shell"},
+    )
+    handle_hook(
+        config,
+        "Stop",
+        {"session_id": "session-1", "last_assistant_message": "Done"},
+    )
+
+    assert client.acquires == [
+        {
+            "client": "codex",
+            "session_id": "session-1",
+            "ttl_seconds": 3_600.0,
+        }
+    ]
+    assert client.heartbeats == ["session-lease"]
+    assert client.releases[-1] == "session-lease"
+
+
 def test_recall_is_advisory_and_round_is_delivered(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
@@ -77,12 +132,22 @@ def test_recall_is_advisory_and_round_is_delivered(tmp_path: Path, monkeypatch) 
     handle_hook(
         config,
         "PreToolUse",
-        {"session_id": "session-1", "tool_name": "shell", "tool_use_id": "call-1", "tool_input": {"command": "deploy"}},
+        {
+            "session_id": "session-1",
+            "tool_name": "shell",
+            "tool_use_id": "call-1",
+            "tool_input": {"command": "deploy"},
+        },
     )
     handle_hook(
         config,
         "PostToolUse",
-        {"session_id": "session-1", "tool_name": "shell", "tool_use_id": "call-1", "tool_response": "ok"},
+        {
+            "session_id": "session-1",
+            "tool_name": "shell",
+            "tool_use_id": "call-1",
+            "tool_response": "ok",
+        },
     )
     handle_hook(
         config,
@@ -103,9 +168,7 @@ def test_recall_is_advisory_and_round_is_delivered(tmp_path: Path, monkeypatch) 
     assert json.loads(state.read_text(encoding="utf-8")) == {}
 
 
-def test_successful_recall_clears_stale_network_diagnostic(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_successful_recall_clears_stale_network_diagnostic(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
     config = _config(tmp_path)
@@ -205,9 +268,7 @@ def test_failure_event_is_not_recorded_as_success(tmp_path: Path, monkeypatch) -
     assert result["status"] == "error"
 
 
-def test_exit_code_is_preserved_in_structured_tool_result(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_exit_code_is_preserved_in_structured_tool_result(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
     config = _config(tmp_path)
@@ -355,9 +416,7 @@ def test_oversized_round_keeps_trajectory_and_compacts_only_tool_payload(
     assert "preview" not in omitted
 
 
-def test_inline_screenshot_is_removed_without_losing_tool_text(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_inline_screenshot_is_removed_without_losing_tool_text(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     monkeypatch.setattr(bridge_module, "_client", lambda _config: client)
     config = _config(tmp_path)
@@ -387,11 +446,7 @@ def test_inline_screenshot_is_removed_without_losing_tool_text(
             "tool_use_id": "call-image",
             "tool_response": {
                 "content": [{"text": "Policy page is visible"}],
-                "_meta": {
-                    "codex/toolSurface": {
-                        "screenshot": {"url": screenshot, "width": 1280}
-                    }
-                },
+                "_meta": {"codex/toolSurface": {"screenshot": {"url": screenshot, "width": 1280}}},
             },
         },
     )
@@ -415,17 +470,18 @@ def test_inline_screenshot_is_removed_without_losing_tool_text(
 
 
 def test_disabled_bridge_is_a_noop(tmp_path: Path) -> None:
-    assert handle_hook(
-        _config(tmp_path, enabled=False),
-        "UserPromptSubmit",
-        {"session_id": "session-1", "prompt": "hello"},
-    ) == {}
+    assert (
+        handle_hook(
+            _config(tmp_path, enabled=False),
+            "UserPromptSubmit",
+            {"session_id": "session-1", "prompt": "hello"},
+        )
+        == {}
+    )
     assert not (tmp_path / "spool").exists()
 
 
-def test_user_prompt_is_persisted_before_recall_starts(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_user_prompt_is_persisted_before_recall_starts(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     config = _config(tmp_path)
     state_path = tmp_path / "spool" / "sessions" / "session-1.json"
@@ -445,9 +501,7 @@ def test_user_prompt_is_persisted_before_recall_starts(
     )
 
 
-def test_stop_enqueues_and_clears_state_before_delivery(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_stop_enqueues_and_clears_state_before_delivery(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     config = _config(tmp_path)
     state_path = tmp_path / "spool" / "sessions" / "session-1.json"
@@ -480,9 +534,7 @@ def test_stop_enqueues_and_clears_state_before_delivery(
     assert len(client.submitted) == 1
 
 
-def test_session_end_only_performs_durable_local_handoff(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_session_end_only_performs_durable_local_handoff(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     config = _config(tmp_path)
     state_path = tmp_path / "spool" / "sessions" / "session-1.json"
@@ -529,9 +581,7 @@ def test_stop_discards_unusable_tool_only_state(tmp_path: Path, monkeypatch) -> 
     assert not list((tmp_path / "spool" / "ready-delivery").glob("*.json"))
 
 
-def test_stop_drops_orphan_tool_result_after_process_restart(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_stop_drops_orphan_tool_result_after_process_restart(tmp_path: Path, monkeypatch) -> None:
     client = _Client()
     config = _config(tmp_path)
     monkeypatch.setattr(bridge_module, "_client", lambda _config: client)

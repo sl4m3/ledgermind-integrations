@@ -113,11 +113,20 @@ class LedgerMindClient:
     def health_details(self) -> dict[str, Any]:
         return self._request("GET", "/health/details", None)
 
-    def runtime_acquire(self, *, client: str, session_id: str) -> dict[str, Any]:
+    def runtime_acquire(
+        self,
+        *,
+        client: str,
+        session_id: str,
+        ttl_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"client": client, "session_id": session_id}
+        if ttl_seconds is not None:
+            payload["ttl_seconds"] = ttl_seconds
         return self._request(
             "POST",
             "/runtime/acquire",
-            {"client": client, "session_id": session_id},
+            payload,
         )
 
     def runtime_heartbeat(self, lease_id: str) -> dict[str, Any]:

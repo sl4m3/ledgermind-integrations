@@ -39,21 +39,29 @@ class RuntimeLease:
         session_id: str,
         heartbeat_seconds: float,
         bootstrap_command: str | Sequence[str] | None = None,
+        ttl_seconds: float | None = None,
+        start_heartbeat: bool = True,
     ) -> RuntimeLease:
         try:
-            response = client.runtime_acquire(client=client_id, session_id=session_id)
+            response = client.runtime_acquire(
+                client=client_id,
+                session_id=session_id,
+                ttl_seconds=ttl_seconds,
+            )
         except LedgerMindNetworkError:
             response = _bootstrap_runtime(
                 client,
                 client_id=client_id,
                 session_id=session_id,
                 command=bootstrap_command,
+                ttl_seconds=ttl_seconds,
             )
         lease_id = response.get("lease_id")
         if not isinstance(lease_id, str) or not lease_id:
             raise RuntimeError("runtime acquire returned no lease_id")
         lease = cls(client, lease_id, max(float(heartbeat_seconds), 0.1))
-        lease.start()
+        if start_heartbeat:
+            lease.start()
         return lease
 
     def start(self) -> None:
@@ -94,6 +102,7 @@ def _bootstrap_runtime(
     client_id: str,
     session_id: str,
     command: str | Sequence[str] | None,
+    ttl_seconds: float | None = None,
 ) -> dict[str, object]:
     if command is None:
         raise RuntimeError("LedgerMind runtime is unavailable")
@@ -102,17 +111,20 @@ def _bootstrap_runtime(
         raise RuntimeError("LedgerMind runtime bootstrap command is empty")
     parts[0] = os.path.expanduser(parts[0])
     try:
+        arguments = [
+            *parts,
+            "runtime",
+            "acquire",
+            "--client",
+            client_id,
+            "--session-id",
+            session_id,
+        ]
+        if ttl_seconds is not None:
+            arguments.extend(("--ttl-seconds", str(float(ttl_seconds))))
+        arguments.append("--json")
         completed = subprocess.run(
-            [
-                *parts,
-                "runtime",
-                "acquire",
-                "--client",
-                client_id,
-                "--session-id",
-                session_id,
-                "--json",
-            ],
+            arguments,
             capture_output=True,
             text=True,
             # A cold secure-runtime start verifies the signed Core and waits

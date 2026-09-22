@@ -6,6 +6,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal, cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,8 @@ class HermesConfig:
     runtime_endpoint: str | None = None
     runtime_command: str | None = None
     runtime_heartbeat_seconds: float = 10.0
+    model_residency_mode: Literal["session", "idle", "always_on"] = "idle"
+    session_safety_ttl_seconds: float = 3_600.0
     project_id: str | None = None
     repository_id: str | None = None
     task_id: str | None = None
@@ -51,6 +54,9 @@ def load_config(path: str | Path) -> HermesConfig:
     for key in _REQUIRED:
         if not str(payload.get(key, "")).strip():
             raise ValueError(f"Hermes config requires {key}")
+    residency_mode = str(payload.get("model_residency_mode", "idle"))
+    if residency_mode not in {"session", "idle", "always_on"}:
+        raise ValueError("Hermes config has invalid model_residency_mode")
     heartbeat_value = payload.get("heartbeat_seconds")
     if heartbeat_value is None:
         heartbeat_value = payload.get("runtime_heartbeat_seconds")
@@ -102,6 +108,13 @@ def load_config(path: str | Path) -> HermesConfig:
         runtime_heartbeat_seconds=max(
             float(str(heartbeat_value)),
             0.1,
+        ),
+        model_residency_mode=cast(
+            Literal["session", "idle", "always_on"],
+            residency_mode,
+        ),
+        session_safety_ttl_seconds=max(
+            float(payload.get("session_safety_ttl_seconds", 3_600.0)), 1.0
         ),
         project_id=optional_text("project_id"),
         repository_id=optional_text("repository_id"),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,8 @@ class LifecycleConfig:
     adapter_version: str = "lifecycle-python/0.1.0"
     allow_remote: bool = False
     managed_runtime: bool = False
+    model_residency_mode: Literal["session", "idle", "always_on"] = "idle"
+    session_safety_ttl_seconds: float = 3_600.0
 
 
 _REQUIRED = (
@@ -44,6 +47,9 @@ def load_lifecycle_config(path: str | Path) -> LifecycleConfig:
     for key in _REQUIRED:
         if not isinstance(payload.get(key), str) or not payload[key].strip():
             raise ValueError(f"integration config requires {key}")
+    residency_mode = str(payload.get("model_residency_mode", "idle"))
+    if residency_mode not in {"session", "idle", "always_on"}:
+        raise ValueError("integration config has invalid model_residency_mode")
     return LifecycleConfig(
         target=str(payload["target"]),
         endpoint=str(payload["endpoint"]).rstrip("/"),
@@ -55,15 +61,18 @@ def load_lifecycle_config(path: str | Path) -> LifecycleConfig:
         runtime_command=str(payload["runtime_command"]),
         enabled=bool(payload.get("enabled", True)),
         context_limit=max(int(payload.get("context_limit", 5)), 1),
-        request_timeout_seconds=max(
-            float(payload.get("request_timeout_seconds", 5.0)), 0.1
-        ),
+        request_timeout_seconds=max(float(payload.get("request_timeout_seconds", 5.0)), 0.1),
         heartbeat_seconds=max(float(payload.get("heartbeat_seconds", 10.0)), 0.1),
-        adapter_version=str(
-            payload.get("adapter_version", "lifecycle-python/0.1.0")
-        ),
+        adapter_version=str(payload.get("adapter_version", "lifecycle-python/0.1.0")),
         allow_remote=bool(payload.get("allow_remote", False)),
         managed_runtime=bool(payload.get("managed_runtime", False)),
+        model_residency_mode=cast(
+            Literal["session", "idle", "always_on"],
+            residency_mode,
+        ),
+        session_safety_ttl_seconds=max(
+            float(payload.get("session_safety_ttl_seconds", 3_600.0)), 1.0
+        ),
     )
 
 

@@ -55,9 +55,7 @@ def _prompt(payload: Mapping[str, Any]) -> str:
 
 def _tool(payload: Mapping[str, Any]) -> tuple[str, object, str]:
     name = payload.get("tool_name", payload.get("toolName", payload.get("tool", "tool")))
-    arguments = payload.get(
-        "tool_input", payload.get("toolInput", payload.get("arguments", {}))
-    )
+    arguments = payload.get("tool_input", payload.get("toolInput", payload.get("arguments", {})))
     call_id = payload.get("tool_use_id", payload.get("toolUseId", payload.get("call_id", "")))
     return _text(name) or "tool", arguments, _text(call_id)
 
@@ -106,9 +104,7 @@ def _result(payload: Mapping[str, Any], event: str) -> tuple[object, str]:
             "toolResponse",
             payload.get(
                 "tool_output",
-                payload.get(
-                    "result", payload.get("output", payload.get("error_message", ""))
-                ),
+                payload.get("result", payload.get("output", payload.get("error_message", ""))),
             ),
         ),
     )
@@ -180,9 +176,7 @@ def _client(config: LifecycleConfig) -> LedgerMindClient:
 
 
 @contextmanager
-def _leased_client(
-    config: LifecycleConfig, session_id: str
-) -> Iterator[LedgerMindClient]:
+def _leased_client(config: LifecycleConfig, session_id: str) -> Iterator[LedgerMindClient]:
     client = _client(config)
     if config.managed_runtime:
         yield client
@@ -198,6 +192,53 @@ def _leased_client(
         yield client
     finally:
         lease.release()
+
+
+def _session_client(config: LifecycleConfig, session_id: str) -> LedgerMindClient:
+    """Acquire or refresh the durable lease that spans one complete agent turn."""
+
+    client = _client(config)
+    if config.managed_runtime or config.model_residency_mode != "session":
+        return client
+    with _locked_state(config, session_id) as state:
+        lease_id = _text(state.get("runtime_lease_id"))
+        if lease_id:
+            try:
+                client.runtime_heartbeat(lease_id)
+                return client
+            except (LedgerMindClientError, OSError, RuntimeError, ValueError):
+                state.pop("runtime_lease_id", None)
+        lease = RuntimeLease.acquire(
+            client,
+            client_id=config.target,
+            session_id=session_id,
+            heartbeat_seconds=config.heartbeat_seconds,
+            bootstrap_command=config.runtime_command,
+            ttl_seconds=config.session_safety_ttl_seconds,
+            start_heartbeat=False,
+        )
+        state["runtime_lease_id"] = lease.lease_id
+    return client
+
+
+def _refresh_session_lease(config: LifecycleConfig, session_id: str) -> None:
+    if config.managed_runtime or config.model_residency_mode != "session":
+        return
+    try:
+        _session_client(config, session_id)
+    except (LedgerMindClientError, OSError, RuntimeError, ValueError):
+        # Tool capture must remain independent of runtime availability.
+        return
+
+
+def _release_session_lease(config: LifecycleConfig, lease_id: str) -> None:
+    if not lease_id or config.managed_runtime or config.model_residency_mode != "session":
+        return
+    try:
+        _client(config).runtime_release(lease_id)
+    except (LedgerMindClientError, OSError, RuntimeError, ValueError):
+        # The safety TTL remains the crash-recovery path.
+        return
 
 
 def _format_context(response: Mapping[str, Any]) -> str:
@@ -238,9 +279,9 @@ def _append(state: dict[str, Any], event: dict[str, Any]) -> None:
 
 
 def _encoded_bytes(value: object) -> bytes:
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+        "utf-8"
+    )
 
 
 def _omitted_tool_payload(value: object) -> dict[str, object]:
@@ -251,9 +292,7 @@ def _omitted_tool_payload(value: object) -> dict[str, object]:
         "original_bytes": len(encoded),
         "sha256": hashlib.sha256(encoded).hexdigest(),
     }
-    if isinstance(value, str) and not (
-        value.startswith("data:") and ";base64," in value[:256]
-    ):
+    if isinstance(value, str) and not (value.startswith("data:") and ";base64," in value[:256]):
         marker["preview"] = value[:512]
     return marker
 
@@ -281,10 +320,7 @@ def _sanitize_inline_binary(value: object) -> object:
     if isinstance(value, list):
         return [_sanitize_inline_binary(item) for item in value]
     if isinstance(value, dict):
-        return {
-            key: _sanitize_inline_binary(item)
-            for key, item in value.items()
-        }
+        return {key: _sanitize_inline_binary(item) for key, item in value.items()}
     return value
 
 
@@ -293,9 +329,7 @@ def _compact_tool_events(
 ) -> list[object]:
     """Keep one trajectory while shedding only the largest tool payloads."""
 
-    compacted = _sanitize_inline_binary(
-        json.loads(json.dumps(events, ensure_ascii=False))
-    )
+    compacted = _sanitize_inline_binary(json.loads(json.dumps(events, ensure_ascii=False)))
     if not isinstance(compacted, list):
         return list(events)
     current_size = sum(len(_encoded_bytes(event)) for event in compacted)
@@ -363,6 +397,7 @@ def _enqueue_finished_round(
         )
     round_id = _text(state.get("round_id")) or uuid4().hex
     spool = FileSpool(config.spool_dir)
+
     def build(candidate_events: list[object]) -> dict[str, Any]:
         return build_raw_round(
             memory_space_id=config.memory_space_id,
@@ -399,8 +434,11 @@ def _deliver_ready(config: LifecycleConfig, session_id: str) -> None:
 
     spool = FileSpool(config.spool_dir)
     try:
-        with _leased_client(config, session_id) as client:
-            DeliveryWorker(spool, client).run_once(limit=10)
+        if config.model_residency_mode == "session":
+            DeliveryWorker(spool, _client(config)).run_once(limit=10)
+        else:
+            with _leased_client(config, session_id) as client:
+                DeliveryWorker(spool, client).run_once(limit=10)
         if spool.stats().ready_delivery:
             spool.note_delivery_failure("delivery_pending_retry")
         else:
@@ -409,9 +447,7 @@ def _deliver_ready(config: LifecycleConfig, session_id: str) -> None:
         spool.note_delivery_failure(type(exc).__name__)
 
 
-def handle_hook(
-    config: LifecycleConfig, event: str, payload: Mapping[str, Any]
-) -> dict[str, Any]:
+def handle_hook(config: LifecycleConfig, event: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     """Process one normalized lifecycle event and return a host-neutral result."""
 
     if not config.enabled:
@@ -428,12 +464,20 @@ def handle_hook(
             if prompt:
                 _append(state, {"kind": "message", "role": "user", "content": prompt})
         try:
-            with _leased_client(config, session_id) as client:
+            if config.model_residency_mode == "session":
+                client = _session_client(config, session_id)
                 response = client.retrieve_context(
                     memory_space_id=config.memory_space_id,
                     query=prompt,
                     limit=config.context_limit,
                 )
+            else:
+                with _leased_client(config, session_id) as client:
+                    response = client.retrieve_context(
+                        memory_space_id=config.memory_space_id,
+                        query=prompt,
+                        limit=config.context_limit,
+                    )
             context = _format_context(response)
             spool = FileSpool(config.spool_dir)
             if not spool.stats().ready_delivery:
@@ -443,6 +487,7 @@ def handle_hook(
             context = ""
         return {"additional_context": context} if context else {}
     if normalized in {"pretooluse", "beforetoolcall"}:
+        _refresh_session_lease(config, session_id)
         with _locked_state(config, session_id) as state:
             state.setdefault("round_id", uuid4().hex)
             state.setdefault("started_at", _now())
@@ -458,6 +503,7 @@ def handle_hook(
             )
         return {}
     if normalized in {"posttooluse", "posttoolusefailure", "aftertoolcall"}:
+        _refresh_session_lease(config, session_id)
         with _locked_state(config, session_id) as state:
             state.setdefault("round_id", uuid4().hex)
             state.setdefault("started_at", _now())
@@ -490,6 +536,8 @@ def handle_hook(
         return {}
     if normalized in {"stop", "sessionend", "agentend"}:
         with _locked_state(config, session_id) as state:
+            runtime_lease_id = _text(state.get("runtime_lease_id"))
+            state.pop("runtime_lease_id", None)
             state.setdefault("round_id", uuid4().hex)
             state.setdefault("started_at", _now())
             answer = payload.get("last_assistant_message", payload.get("response", ""))
@@ -503,6 +551,7 @@ def handle_hook(
         # the durable local handoff; a normal background Stop performs delivery.
         if enqueued and normalized != "sessionend":
             _deliver_ready(config, session_id)
+        _release_session_lease(config, runtime_lease_id)
         return {}
     return {}
 
